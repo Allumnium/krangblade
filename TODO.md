@@ -12,6 +12,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.122.3: Seed 3–5 small destructible frontier pirate installations (500 HP, reuse depot vector art), with five initial ships each (one cruiser/four fighters); faction ID is base hull ID, shared pirate hostility unchanged, group gathering restricted to same faction. Pirate targets inside settled claims excluded. No reinforcements or defector recruitment yet. Solo checks added; runtime pending.
+
 - [ ] v0.122.2: Bootstrap a complete 96-segment Imperial polygon with 96 nodes outside maximum orbital rock extent, 300-unit clearance. Prebuilt segments exceed player placement length to bound entity count; same destructible wall, collision, combat and open-border rules. Solo/peer assertions added; runtime pending.
 
 - [ ] v0.122.1: Initialize the central Imperial faction at live match start without using a lobby/peer slot. Separate simulation owner ID (chosen deterministically below reserved pirate combat group, avoiding ordinary IDs), developed planetary system with three Large yards, max warehouse/habitation, explicit production buildings, stock, taxes, wages, all planetary defenses, plating and lasers; 27 initial hulls with embarked crew, military holds position, civilian behavior uses existing rules. Start allied/open borders bilaterally with every ordinary player; no transitive alliance. Exclude Empire from ordinary victory, elimination, defeat-credit recipient, conquest scoring and player authority. Give gold tint/name and diplomacy row. No ordinary expansion AI, no dedicated Imperial patrol/reinforcement/rebellion yet. Wall and pirate bases remain separate slices. Add solo and ENet initial state checks; runtime, economy and large-map performance unvalidated.

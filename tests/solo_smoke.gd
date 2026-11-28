@@ -82,7 +82,7 @@ func _run() -> void:
 		push_error("Solo seed or layout was not preserved by the session.")
 		quit(1)
 		return
-	if roster.size() != 4 or initial_state["ships"].filter(func(craft: Dictionary) -> bool: return not ECON.is_imperial_owner(initial_state, int(craft["owner"]))).size() != 28:
+	if roster.size() != 4 or initial_state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) > 0 and not ECON.is_imperial_owner(initial_state, int(craft["owner"]))).size() != 28:
 		push_error("Solo roster or starting fleets are incorrect.")
 		quit(1)
 		return
@@ -102,6 +102,12 @@ func _run() -> void:
 		var outside: Vector2 = center.lerp(wall["position"], 1.1)
 		assert(ECON.wall_first_hit(initial_state, grid, 1, center, outside, true).is_empty())
 		assert(not ECON.wall_first_hit(initial_state, grid, ECON.PIRATE_OWNER, center, outside, true).is_empty())
+	var pirate_bases: Array = initial_state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "pirate_base")
+	assert(pirate_bases.size() == 5)
+	for base in pirate_bases:
+		assert(int(base["owner"]) == ECON.PIRATE_OWNER and ECON.static_complete(base))
+		assert((base["position"] as Vector2).distance_to(center) > (initial_state["map"]["points"][0] as Vector2).distance_to(center))
+		assert(initial_state["ships"].filter(func(craft: Dictionary) -> bool: return bool(craft.get("rogue", false)) and int(craft.get("pirate_faction", -1)) == int(base["id"])).size() == 5)
 	assert(not initial_state["starting_empires"].has(imperial) and not initial_state["ai_players"].has(imperial))
 	for player in roster:
 		assert(ECON.empires_allied(initial_state, imperial, int(player)) and ECON.open_borders(initial_state, imperial, int(player)))
@@ -302,7 +308,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (setup["ships"].filter(func(craft: Dictionary) -> bool: return not ECON.is_imperial_owner(setup, int(craft["owner"]))).size() == 21):
+	if not (setup["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) > 0 and not ECON.is_imperial_owner(setup, int(craft["owner"]))).size() == 21):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return

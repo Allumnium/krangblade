@@ -727,6 +727,7 @@ func _activate_match(snapshot: Dictionary, map_seed: int) -> void:
 	diagnostic_snapshot_bytes = 0
 	economy = ECONOMY.create(MAP.generate(map_seed, players.size(), map_layout), players, RULES.ordered_peers(players))
 	ECONOMY.initialize_imperial_core(economy)
+	ECONOMY.initialize_frontier_pirates(economy)
 	ECONOMY.initialize_diplomacy(economy)
 	economy["time_speed"] = 1
 	economy["eliminated"] = []
