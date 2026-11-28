@@ -403,6 +403,10 @@ static func _spawn_imperial_perimeter(state: Dictionary, index: int, owner: int)
 		wall.merge({"wall_a_id": int(a["id"]), "wall_b_id": int(b["id"]), "wall_a": first, "wall_b": second, "heading": first.direction_to(second)}, true)
 
 static func _spawn_imperial_fleet(state: Dictionary, index: int, system: Dictionary) -> void:
+	var center: Vector2 = state["map"]["points"][index]
+	var belt_radius: float = float(state["map"]["fields"][index]["orbit_radius"])
+	var station: Vector2 = station_position(state, index, float(state["elapsed"]))
+	var phase: float = fposmod(float(state["map"]["seed"]), TAU)
 	var kinds: Array = []
 	for entry in [["fighter", 12], ["cruiser", 4], ["destroyer", 2], ["railgun_ship", 2], ["miner", 3], ["ship", 2], ["science_ship", 1], ["construction_ship", 1]]:
 		for count in range(int(entry[1])):
@@ -413,12 +417,38 @@ static func _spawn_imperial_fleet(state: Dictionary, index: int, system: Diction
 		state["next_id"] = id + 1
 		var crew: float = float(CREW_COSTS[kind])
 		system["population"] = maxf(0.0, float(system["population"]) - crew)
-		var offset: Vector2 = Vector2.from_angle(TAU * float(slot) / float(kinds.size())) * (SHIP_CLEARANCE * 7.0)
-		_launch_finished_hull(state, index, system, {"id": id, "kind": kind, "population_allocated": crew, "spawn_offset": offset, "starting_fleet": true})
+		# Seed-stable, staggered radii and bearings, independent of launch order.
+		# Keep the normal launch clearance check and civilian work routines.
+		var angle: float = phase + float(slot) * 2.399963
+		var fraction: float = 0.34 + 0.14 * float(slot % 5)
+		if kind == "miner":
+			fraction = 0.96
+		elif kind == "ship":
+			fraction = 0.50 + 0.12 * float(slot % 2)
+		elif not military_hull(kind):
+			fraction = 0.65
+		var preferred: Vector2 = center + Vector2.from_angle(angle) * belt_radius * fraction
+		_launch_finished_hull(state, index, system, {"id": id, "kind": kind, "population_allocated": crew, "spawn_offset": preferred - station, "starting_fleet": true})
 		var hull: Dictionary = state["ships"].back()
 		if military_hull(kind):
-			hull["holding"] = true
-			hull["wander_auto"] = false
+			# Both endpoints lie inside the Imperial perimeter. Reuse the
+			# ordinary looping patrol state, including combat/repair overrides.
+			var turn: float = 0.55 if slot % 2 == 0 else -0.55
+			var target_fraction: float = 0.34 + 0.14 * float((slot + 2) % 5)
+			var target: Vector2 = center + Vector2.from_angle(angle + turn) * belt_radius * target_fraction
+			hull["patrol_from"] = index
+			hull["patrol_to"] = index
+			hull["patrol_start_point"] = hull["position"]
+			hull["patrol_end_point"] = target
+			hull["patrol_returning"] = false
+			hull["patrol_arrived"] = false
+			hull["dest"] = index
+			hull["operation_target"] = index
+			hull["direct_order"] = true
+			hull["move_only"] = false
+			hull["navigation_target"] = target
+			hull["heading"] = (hull["position"] as Vector2).direction_to(target)
+			_set_unit_order(state, hull, {"kind": "patrol", "target": index, "point": target})
 
 static func _generate_system(rng: RandomNumberGenerator, i: int, ordered: Array[int]) -> Dictionary:
 	var stock: Dictionary = empty_stock()

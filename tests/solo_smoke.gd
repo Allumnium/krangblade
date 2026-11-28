@@ -95,6 +95,19 @@ func _run() -> void:
 	assert(walls.size() == ECON.IMPERIAL_WALL_SEGMENTS)
 	var center: Vector2 = initial_state["map"]["points"][initial_state["map"]["imperial_system"]]
 	var belt: Dictionary = initial_state["map"]["fields"][initial_state["map"]["imperial_system"]]
+	var patrol_count: int = 0
+	var belt_radius: float = float(belt["orbit_radius"])
+	for craft in initial_state["ships"]:
+		if int(craft["owner"]) != imperial or ECON.is_static_structure(craft):
+			continue
+		assert((craft["position"] as Vector2).distance_to(center) < belt_radius * 1.13)
+		if ECON.military_hull(str(craft["kind"])):
+			patrol_count += 1
+			assert(not bool(craft.get("holding", false)) and craft.get("unit_order", {}).get("kind") == "patrol")
+			assert((craft["patrol_start_point"] as Vector2).distance_to(center) > belt_radius * 0.30)
+			assert((craft["patrol_end_point"] as Vector2).distance_to(center) < belt_radius)
+			assert((craft["patrol_start_point"] as Vector2).distance_to(craft["patrol_end_point"]) > belt_radius * 0.10)
+	assert(patrol_count == 20)
 	var grid: Dictionary = ECON.wall_grid(initial_state)
 	for wall in walls:
 		var apothem: float = center.distance_to(Geometry2D.get_closest_point_to_segment(center, wall["wall_a"], wall["wall_b"]))

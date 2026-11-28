@@ -1,5 +1,7 @@
 # Warbound — development TODO
 
+- [ ] v0.122.8: Distribute all 27 initial Imperial hulls over seed-stable bearings and multiple radii within the perimeter, miners near the belt and freighters on intermediate radii. Twenty military hulls begin normal independent two-point patrols with heading toward the first destination instead of holding around the station. Preserve launch clearance, crew, fleet composition, civilian work, authority, combat and repair rules; no new AI or wire schema. Solo and peer initialization checks and Codex updated. Patrol radii/angles provisional; Godot runtime, visual, performance and peer verification pending.
+
 - [ ] v0.122.7: Opening-game profiler investigation: asteroid orbit/ore changes caused full immutable-map duplication/freezing on the authority worker. Reuse equal detached top-level map values and unchanged fields, recursively freeze changed fields only, avoid scalar recursive calls; exact value comparison, previous snapshot isolation and wire schema preserved. Extend worker map lifecycle regression for geometry/field identity, ore/position mutation and removal. User reports better FPS after v0.122.6 territory reduction. Fog union/mask, wall sensor cost and render/pose costs remain profiling targets; no hardware FPS or runtime/peer claim.
 
 ## Imperial core and frontier redesign (2026-11-27; confirmed direction, implementation pending)
