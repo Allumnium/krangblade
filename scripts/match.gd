@@ -1724,7 +1724,7 @@ func _build_body_overview(parent: Container) -> void:
 func _refresh_body_overview(system: Dictionary) -> void:
 	var owner: int = int(system["owner"])
 	var roster: Dictionary = session.get("players")
-	var owner_name: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
+	var owner_name: String = "Neutral" if owner == 0 else ("The Empire" if ECONOMY.is_imperial_owner(_state(), owner) else str(roster.get(owner, {}).get("name", "Player")))
 	body_title.text = _body_name(selected, selected_body)
 	body_context.text = "%s\n%s" % [_system_name(selected), owner_name]
 	var has_battery: bool = system.get("pds", {}).has(selected_body)
@@ -2946,7 +2946,7 @@ func _refresh() -> void:
 		return
 	var owner: int = int(p["owner"])
 	var roster: Dictionary = session.get("players")
-	var name_text: String = "Neutral" if owner == 0 else str(roster.get(owner, {}).get("name", "Player"))
+	var name_text: String = "Neutral" if owner == 0 else ("The Empire" if ECONOMY.is_imperial_owner(state, owner) else str(roster.get(owner, {}).get("name", "Player")))
 	info.text = ("Space Station · " if building_selection_kind == "station" else "") + _system_name(selected)
 	info.tooltip_text = info.text + (" · Home" if bool(p["home"]) else "")
 	if ECONOMY.has_station(p):
@@ -3212,6 +3212,8 @@ func _empire_color_index(owner: int) -> int:
 	return clampi(int(roster.get(owner, {}).get("color", 0)), 0, RULES.MAX_PLAYERS)
 
 func _empire_color(owner: int) -> Color:
+	if ECONOMY.is_imperial_owner(_state(), owner):
+		return ECONOMY.IMPERIAL_COLOR
 	if owner == ECONOMY.PIRATE_OWNER:
 		return Color("#85888b")
 	return COLORS[_empire_color_index(owner)]
