@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.122.4: One autonomous reinforcement per living pirate base every 120 simulation years, cap 12 faction hulls for autonomous spawns, three fighters then one cruiser in repeating cadence. No catch-up bursts or base respawn; destruction stops new reinforcements but surviving ships remain. Canonical roster, clock and counters replicate normally. Add cadence/cap/destruction and peer initialization tests; runtime pending.
+
 - v0.122.3: Seed 3–5 small destructible frontier pirate installations (500 HP, reuse depot vector art), with five initial ships each (one cruiser/four fighters); faction ID is base hull ID, shared pirate hostility unchanged, group gathering restricted to same faction. Pirate targets inside settled claims excluded. No reinforcements or defector recruitment yet. Solo checks added; runtime pending.
 
 - v0.122.2: Bootstrap a complete 96-segment Imperial polygon with 96 nodes outside maximum orbital rock extent, 300-unit clearance. Prebuilt segments exceed player placement length to bound entity count; same destructible wall, collision, combat and open-border rules. Solo/peer assertions added; runtime pending.

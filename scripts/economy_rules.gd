@@ -95,6 +95,8 @@ const ROGUE_CHECK_YEARS: float = 10.0
 const ROGUE_CHANCE: float = 0.005
 const PIRATE_OWNER: int = -1
 const PIRATE_BASE_HP: float = 500.0
+const PIRATE_REINFORCEMENT_YEARS: float = 120.0
+const PIRATE_REINFORCEMENT_CAP: int = 12
 const IMPERIAL_OWNER_START: int = 2147482999
 const IMPERIAL_START_GC: float = 10000.0
 const IMPERIAL_WALL_SEGMENTS: int = 96
@@ -949,6 +951,7 @@ static func initialize_frontier_pirates(state: Dictionary) -> bool:
 	if home_count < 1 or not state["map"].has("imperial_system"):
 		return false
 	state["frontier_pirates_initialized"] = true
+	state["pirate_next_reinforcement"] = float(state["elapsed"]) + PIRATE_REINFORCEMENT_YEARS
 	var center: Vector2 = state["map"]["size"] * 0.5
 	var home_radius: float = center.distance_to(state["map"]["points"][0])
 	var outer_radius: float = minf(center.x, center.y)
@@ -979,6 +982,36 @@ static func _spawn_pirate_hull(state: Dictionary, base: Dictionary, kind: String
 	state["ships"].append(hull)
 	_register_indexed_hull(state, hull)
 	return hull
+
+# One bounded roster census per reinforcement interval. A faction has no
+# independent spawn source once its installation is gone; no base respawn.
+static func _reinforce_pirate_factions(state: Dictionary) -> void:
+	if not bool(state.get("frontier_pirates_initialized", false)):
+		return
+	var now: float = float(state["elapsed"])
+	if now + EPS < float(state.get("pirate_next_reinforcement", INF)):
+		return
+	state["pirate_next_reinforcement"] = now + PIRATE_REINFORCEMENT_YEARS
+	var counts: Dictionary = {}
+	var bases: Array = []
+	for craft in state["ships"]:
+		if int(craft["owner"]) != PIRATE_OWNER:
+			continue
+		if craft["kind"] == "pirate_base":
+			if float(craft["hp"]) > EPS:
+				bases.append(craft)
+		elif bool(craft.get("rogue", false)):
+			var faction: int = int(craft.get("pirate_faction", -1))
+			counts[faction] = int(counts.get(faction, 0)) + 1
+	for base in bases:
+		var faction: int = int(base["id"])
+		var count: int = int(counts.get(faction, 0))
+		if count >= PIRATE_REINFORCEMENT_CAP:
+			continue
+		var wave: int = int(base.get("pirate_reinforcements", 0))
+		var kind: String = "cruiser" if wave % 4 == 3 else "fighter"
+		_spawn_pirate_hull(state, base, kind, wave + 5)
+		base["pirate_reinforcements"] = wave + 1
 
 static func _pirate_power(ship: Dictionary) -> float:
 	var kind: String = str(ship.get("kind", ""))
@@ -13014,6 +13047,8 @@ static func _step_economy(state: Dictionary, frame: STEP_FRAME, dt: float, econo
 		_work_planet(state, i, dt, bases.get(i, {}), census)
 	_refill_empire_fleets(state)
 	_begin_hull_index(state)
+	if dt > 0.0:
+		_reinforce_pirate_factions(state)
 	_step_colonize_autocast(state)
 
 static func _step_ai(state: Dictionary, frame: STEP_FRAME, dt: float) -> void:
