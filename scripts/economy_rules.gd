@@ -97,6 +97,7 @@ const PIRATE_OWNER: int = -1
 const PIRATE_BASE_HP: float = 500.0
 const PIRATE_REINFORCEMENT_YEARS: float = 120.0
 const PIRATE_REINFORCEMENT_CAP: int = 12
+const PIRATE_RECRUIT_RADIUS: float = 200.0
 const IMPERIAL_OWNER_START: int = 2147482999
 const IMPERIAL_START_GC: float = 10000.0
 const IMPERIAL_WALL_SEGMENTS: int = 96
@@ -1026,6 +1027,9 @@ static func _pirate_claims(state: Dictionary) -> Array:
 		if int(system["owner"]) <= 0 or not has_station(system):
 			continue
 		var radius: float = maxf(territory_kernel_reach(base, system_presence_weight(system)) * 1.15, MISSILE_RANGE + 180.0)
+		if is_imperial_owner(state, int(system["owner"])):
+			var belt: Dictionary = state["map"]["fields"][index]
+			radius = maxf(radius, (float(belt.get("orbit_radius", 0.0)) * 1.13 + MAP.ASTEROID_MAX_RADIUS + IMPERIAL_WALL_CLEARANCE) / cos(PI / float(IMPERIAL_WALL_SEGMENTS)) + 100.0)
 		claims.append({"point": state["map"]["points"][index], "radius": radius})
 	return claims
 
@@ -1092,14 +1096,49 @@ static func _pirate_pick_target(point: Vector2, power: float, targets: Array, ce
 			best = target
 	return best
 
+# Recruitment is a physical trip, not a teleport or an ownership transfer
+# at the moment of nonpayment. Select from the live base roster only.
+static func _nearest_pirate_base(point: Vector2, bases: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var distance: float = INF
+	for base in bases:
+		var candidate: float = point.distance_squared_to(base["position"])
+		if candidate < distance or (candidate == distance and int(base["id"]) < int(best.get("id", 2147483647))):
+			best = base
+			distance = candidate
+	return best
+
+static func _pirate_recruit_step(craft: Dictionary, bases: Array) -> bool:
+	var point: Vector2 = craft["position"]
+	var base: Dictionary = _nearest_pirate_base(point, bases)
+	if base.is_empty():
+		# A surviving rogue can still roam; it never recreates a base.
+		craft["pirate_faction"] = -1
+		craft.erase("pirate_recruit_base")
+	else:
+		craft["pirate_recruit_base"] = int(base["id"])
+		if point.distance_squared_to(base["position"]) > PIRATE_RECRUIT_RADIUS * PIRATE_RECRUIT_RADIUS:
+			craft["pirate_phase"] = "recruit"
+			craft["pirate_goal"] = base["position"]
+			return false
+		craft["pirate_faction"] = int(base["id"])
+		craft.erase("pirate_recruit_base")
+	craft["owner"] = PIRATE_OWNER
+	craft["pirate_phase"] = "roam"
+	craft.erase("rogue_origin_owner")
+	return true
+
 static func _pirate_decisions(state: Dictionary) -> void:
 	var epoch: int = floori(float(state["elapsed"]) / PIRATE_DECISION_YEARS)
 	if int(state.get("_pirate_epoch", -1)) == epoch:
 		return
 	state["_pirate_epoch"] = epoch
 	var pirates: Array = []
+	var bases: Array = []
 	for craft in state["ships"]:
-		if bool(craft.get("rogue", false)):
+		if craft.get("kind", "") == "pirate_base" and int(craft["owner"]) == PIRATE_OWNER and float(craft["hp"]) > EPS:
+			bases.append(craft)
+		elif bool(craft.get("rogue", false)):
 			pirates.append(craft)
 	if pirates.is_empty():
 		return
@@ -1120,8 +1159,10 @@ static func _pirate_decisions(state: Dictionary) -> void:
 			if _pirate_claim_depth(point, claims, 100.0) > EPS:
 				craft["pirate_goal"] = _pirate_escape_point(point, claims, bounds, int(craft["id"]))
 				continue
-			craft["owner"] = PIRATE_OWNER
-			craft["pirate_phase"] = "roam"
+			craft.erase("rogue_origin_owner")
+			craft["pirate_phase"] = "recruit"
+		if craft.get("pirate_phase", "") == "recruit" and not _pirate_recruit_step(craft, bases):
+			continue
 		_spatial_insert(pirate_cells, point, PIRATE_GROUP_RANGE, craft)
 	var assigned: Dictionary = {}
 	for leader in pirates:
@@ -1145,7 +1186,7 @@ static func _pirate_decisions(state: Dictionary) -> void:
 			phase = "retreat"
 			destination = _pirate_retreat_point(center, combat_cells, claims, bounds, leader_id)
 		else:
-			destination = _pirate_patrol_point(center, cell, pirate_cells, assigned, claims, bounds, leader_id, epoch)
+			destination = _pirate_patrol_point(center, cell, pirate_cells, assigned, claims, bounds, leader_id, epoch, int(leader.get("pirate_faction", -1)))
 		_pirate_assign_group(group, phase, int(victim.get("id", -1)), destination, bounds)
 
 static func _pirate_gather_group(leader: Dictionary, cell: Vector2i, pirate_cells: Dictionary, assigned: Dictionary) -> Array:
@@ -1176,13 +1217,13 @@ static func _pirate_retreat_point(center: Vector2, combat_cells: Dictionary, cla
 	return _pirate_escape_point(center + away.normalized() * 1000.0, claims, bounds, leader_id)
 
 # Seek other nearby unassigned groups or a seeded open-space patrol point.
-static func _pirate_patrol_point(center: Vector2, cell: Vector2i, pirate_cells: Dictionary, assigned: Dictionary, claims: Array, bounds: Vector2, leader_id: int, epoch: int) -> Vector2:
+static func _pirate_patrol_point(center: Vector2, cell: Vector2i, pirate_cells: Dictionary, assigned: Dictionary, claims: Array, bounds: Vector2, leader_id: int, epoch: int, faction: int = -1) -> Vector2:
 	var destination: Vector2 = center
 	var nearest: float = INF
 	for y in range(-5, 6):
 		for x in range(-5, 6):
 			for other in pirate_cells.get(cell + Vector2i(x, y), []):
-				if assigned.has(int(other["id"])):
+				if assigned.has(int(other["id"])) or int(other.get("pirate_faction", -1)) != faction:
 					continue
 				var distance: float = center.distance_squared_to(other["position"])
 				if distance < nearest and distance < 4000.0 * 4000.0:
@@ -1255,13 +1296,14 @@ static func _make_rogue(ship: Dictionary) -> void:
 	# Drop all orders, inherited technology, auto-service and combat state.
 	var point: Vector2 = ship["position"]
 	var heading: Vector2 = ship.get("heading", Vector2.UP)
+	var former_owner: int = int(ship["owner"])
 	var retained: Dictionary = {}
 	for key in ["id", "kind", "at", "origin", "hp", "crew", "cargo", "kills", "tons_picked", "tons_dropped", "food_produced"]:
 		if ship.has(key):
 			retained[key] = ship[key]
 	ship.clear()
 	ship.merge(retained)
-	ship.merge({"owner": 0, "rogue": true, "position": point, "heading": heading,
+	ship.merge({"owner": 0, "rogue": true, "rogue_origin_owner": former_owner, "position": point, "heading": heading,
 		"navigation_target": point, "route": [], "leg": 0.0, "source": -1, "dest": -1,
 		"field": -1, "mining_mode": "idle", "field_leg": 0.0, "holding": false,
 		"pirate_phase": "escape"})
@@ -7446,6 +7488,13 @@ static func wall_navigation_route(state: Dictionary, grid: Dictionary, owner: in
 		blocker = next_blocker
 	return []
 
+# Only while fleeing, use former-owner passage permissions so a defector
+# can actually exit a fully enclosed system. Never use them for weapons.
+static func _wall_movement_owner(ship: Dictionary) -> int:
+	if bool(ship.get("rogue", false)) and ship.get("pirate_phase", "") == "escape":
+		return int(ship.get("rogue_origin_owner", ship["owner"]))
+	return int(ship["owner"])
+
 static func _wall_detour(ship: Dictionary, before: Vector2, target: Vector2, budget: float) -> Vector2:
 	if _movement_wall_grid.is_empty():
 		if ship.has("_wall_detour"):
@@ -7453,7 +7502,7 @@ static func _wall_detour(ship: Dictionary, before: Vector2, target: Vector2, bud
 		return target
 	if budget <= EPS or before.is_equal_approx(target):
 		return target
-	var owner: int = int(ship["owner"])
+	var owner: int = _wall_movement_owner(ship)
 	var cached: Dictionary = ship.get("_wall_detour", {})
 	if not cached.is_empty() and (cached["target"] as Vector2).distance_to(target) > WALL_NAV_CLEARANCE:
 		cached = {}
@@ -7483,7 +7532,7 @@ static func _wall_detour(ship: Dictionary, before: Vector2, target: Vector2, bud
 static func _clip_wall_move(ship: Dictionary, before: Vector2, after: Vector2) -> Vector2:
 	if _movement_wall_grid.is_empty():
 		return after
-	var hit: Dictionary = wall_first_hit(_movement_wall_state, _movement_wall_grid, int(ship["owner"]), before, after, true)
+	var hit: Dictionary = wall_first_hit(_movement_wall_state, _movement_wall_grid, _wall_movement_owner(ship), before, after, true)
 	if hit.is_empty():
 		return after
 	var point: Vector2 = hit["point"]

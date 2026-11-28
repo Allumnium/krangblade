@@ -3124,6 +3124,34 @@ func _test_pirate_reinforcements() -> void:
 	assert(not state["ships"].has(destroyed))
 	print("PASS: pirate reinforcement cadence, faction cap and destroyed-base permanence")
 
+func _test_pirate_base_recruitment() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	ECON.initialize_frontier_pirates(state)
+	ECON.initialize_diplomacy(state)
+	var bases: Array = state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "pirate_base")
+	var first: Dictionary = bases[0]
+	var point: Vector2 = (first["position"] as Vector2) + Vector2(500.0, 0.0)
+	var hull: Dictionary = {"id": 999999, "kind": "ship", "owner": 1, "position": point, "heading": Vector2.UP, "at": 0, "origin": 0, "hp": ECON.ship_max_hp("ship"), "crew": 25.0, "cargo": {"Metals": 10.0}, "unit_order": {"kind": "stop"}}
+	ECON._make_rogue(hull)
+	assert(not hull.has("unit_order") and ECON._wall_movement_owner(hull) == 1)
+	hull["pirate_phase"] = "recruit"
+	assert(not ECON._pirate_recruit_step(hull, bases))
+	assert(int(hull["owner"]) == 0 and int(hull["pirate_recruit_base"]) == int(first["id"]) and hull["pirate_goal"] == first["position"])
+	ECON._remove_indexed_hull(state, first)
+	bases.erase(first)
+	assert(not ECON._pirate_recruit_step(hull, bases))
+	var nearest: Dictionary = ECON._nearest_pirate_base(point, bases)
+	assert(int(hull["pirate_recruit_base"]) == int(nearest["id"]))
+	hull["position"] = nearest["position"]
+	assert(ECON._pirate_recruit_step(hull, bases))
+	assert(int(hull["owner"]) == ECON.PIRATE_OWNER and int(hull["pirate_faction"]) == int(nearest["id"]))
+	assert(hull["crew"] == 25.0 and hull["cargo"]["Metals"] == 10.0 and hull["kind"] == "ship")
+	assert(not hull.has("rogue_origin_owner"))
+	ECON._make_rogue(hull)
+	assert(ECON._pirate_recruit_step(hull, []))
+	assert(int(hull["pirate_faction"]) == -1)
+	print("PASS: pirate base recruitment, physical arrival, retarget and orphan fallback")
+
 func _test_rogue_defection() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	ECON.initialize_diplomacy(state)
@@ -3400,6 +3428,7 @@ func _initialize() -> void:
 	_test_optional_native_kernels()
 	_test_authority_substep_boundary()
 	_test_pirate_reinforcements()
+	_test_pirate_base_recruitment()
 	_test_rogue_defection()
 	_test_fleet_upkeep()
 	_test_shared_economy_censuses()

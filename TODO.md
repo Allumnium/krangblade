@@ -12,6 +12,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.122.5: Unpaid defectors retain hull/crew/cargo, clear orders, flee as neutral and physically travel to the nearest surviving pirate base; only on arrival within 200 world units become members. Retarget on base loss; no bases leaves an orphan roaming pirate without reinforcement. Former-owner passage used only during escape; Imperial claim includes enclosing wall. Same-faction patrol gathering. Codex and recruitment regression coverage updated; runtime pending.
+
 - [ ] v0.122.4: One autonomous reinforcement per living pirate base every 120 simulation years, cap 12 faction hulls for autonomous spawns, three fighters then one cruiser in repeating cadence. No catch-up bursts or base respawn; destruction stops new reinforcements but surviving ships remain. Canonical roster, clock and counters replicate normally. Add cadence/cap/destruction and peer initialization tests; runtime pending.
 
 - [ ] v0.122.3: Seed 3–5 small destructible frontier pirate installations (500 HP, reuse depot vector art), with five initial ships each (one cruiser/four fighters); faction ID is base hull ID, shared pirate hostility unchanged, group gathering restricted to same faction. Pirate targets inside settled claims excluded. No reinforcements or defector recruitment yet. Solo checks added; runtime pending.
