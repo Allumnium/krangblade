@@ -8,6 +8,7 @@ var dev_mode: bool = false
 var dev_speed_row: HBoxContainer
 var console_output: Callable
 var console_clear: Callable
+var reveal_requested: Callable
 var diagnostic_label: Label
 var diagnostic_panel: VBoxContainer
 var diagnostic_bars: VBoxContainer
@@ -188,8 +189,12 @@ func submit_command(raw: String) -> void:
 			dev_speed_row.visible = dev_mode
 			refresh_speed(session.get("economy"))
 			_dev_console_print("Developer controls enabled." if dev_mode else "Developer controls hidden.")
+		"/reveal":
+			if reveal_requested.is_valid():
+				reveal_requested.call()
+				_dev_console_print("Entire map revealed locally for this match.")
 		"/help":
-			_dev_console_print("/help · /clear · /status · /devmode" + (" · /speed <0|1|2|5> (host/solo)" if dev_mode else ""))
+			_dev_console_print("/help · /clear · /status · /devmode · /reveal" + (" · /speed <0|1|2|5> (host/solo)" if dev_mode else ""))
 		"/clear":
 			console_clear.call()
 		"/status":

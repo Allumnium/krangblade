@@ -6,6 +6,9 @@ const MAP = preload("res://scripts/planet_map.gd")
 
 var _live: Dictionary = {}
 var observing: bool = false
+var revealed: bool = false
+var _mask_stride: int = 1
+var _mask_live: Dictionary = {}
 var _ship_vision_cache: Dictionary = {}
 var _explored: Dictionary = {}
 var texture: ImageTexture
@@ -25,6 +28,8 @@ var profile: Dictionary = {}
 func update(state: Dictionary, player: int, motion_revision: Variant, map_size: Vector2) -> bool:
 	if state.is_empty():
 		observing = false
+		revealed = false
+		_mask_live.clear()
 		_live.clear()
 		_ship_vision_cache.clear()
 		_explored.clear()
@@ -59,7 +64,7 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 		_seed_rock_memory()
 		_seed_starting_memory(state, player)
 	var team: int = ECONOMY._combat_group(state, player)
-	var next_observing: bool = state.get("eliminated", []).has(player)
+	var next_observing: bool = revealed or state.get("eliminated", []).has(player)
 	var revision: Array = [state.get("elapsed"), motion_revision, team, state["ships"].size(), state.get("diplomacy_revision", 0), next_observing]
 	if revision == _revision:
 		return false
@@ -96,37 +101,59 @@ func update(state: Dictionary, player: int, motion_revision: Variant, map_size: 
 # The explored set only grows until map identity changes. A cell leaving
 # live vision becomes explored, and a newly live cell becomes transparent.
 # Keep the exact original colors and bounds; do not upload unchanged masks.
-func _update_mask(prior_live: Dictionary, map_size: Vector2) -> void:
-	var dimensions: Vector2i = ECONOMY.vision_cell(map_size) + Vector2i.ONE
+func mask_world_cell() -> float:
+	return ECONOMY.VISION_CELL * float(_mask_stride)
+
+func _mask_cell(cell: Vector2i) -> Vector2i:
+	return Vector2i(floori(float(cell.x) / float(_mask_stride)), floori(float(cell.y) / float(_mask_stride)))
+
+func discovered(state: Dictionary, player: int, kind: String, index: int) -> bool:
+	if revealed:
+		return index >= 0 and ((kind == "planets" and index < state.get("planets", []).size()) or (kind == "fields" and index < state.get("map", {}).get("fields", []).size()))
+	return ECONOMY.discovered(state, player, kind, index)
+
+func _update_mask(_prior_live: Dictionary, map_size: Vector2) -> void:
+	# Bound presentation texture uploads independently of exact gameplay sight.
+	# A coarse texel is transparent when any of its exact vision cells is live.
+	# Entity visibility and picking still use the original 80-unit cells.
+	var stride: int = maxi(1, ceili(maxf(map_size.x, map_size.y) / (ECONOMY.VISION_CELL * 1023.0)))
+	var stride_changed: bool = stride != _mask_stride
+	_mask_stride = stride
+	var dimensions := Vector2i(floori(map_size.x / mask_world_cell()) + 1, floori(map_size.y / mask_world_cell()) + 1)
 	var bounds := Rect2i(Vector2i.ZERO, dimensions)
 	var explored_color := Color(0.015, 0.025, 0.04, 0.48)
 	var live_color := Color(0.0, 0.0, 0.0, 0.0)
-	var rebuild: bool = _mask_image == null or _mask_image.get_size() != dimensions
+	var next_live: Dictionary = {}
+	for key in _live:
+		next_live[_mask_cell(key)] = true
+	var rebuild: bool = stride_changed or _mask_image == null or _mask_image.get_size() != dimensions
 	var changed: bool = rebuild
 	if rebuild:
 		_mask_image = Image.create(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8)
 		_mask_image.fill(Color(0.015, 0.025, 0.04, 1.0))
 		for key in _explored:
-			if bounds.has_point(key):
-				_mask_image.set_pixelv(key, explored_color)
-		for key in _live:
-			if bounds.has_point(key):
-				_mask_image.set_pixelv(key, live_color)
+			var pixel: Vector2i = _mask_cell(key)
+			if bounds.has_point(pixel):
+				_mask_image.set_pixelv(pixel, explored_color)
+		for pixel in next_live:
+			if bounds.has_point(pixel):
+				_mask_image.set_pixelv(pixel, live_color)
 	else:
-		for key in prior_live:
-			if not _live.has(key) and bounds.has_point(key):
-				_mask_image.set_pixelv(key, explored_color)
+		for pixel in _mask_live:
+			if not next_live.has(pixel) and bounds.has_point(pixel):
+				_mask_image.set_pixelv(pixel, explored_color)
 				changed = true
-		for key in _live:
-			if not prior_live.has(key) and bounds.has_point(key):
-				_mask_image.set_pixelv(key, live_color)
+		for pixel in next_live:
+			if not _mask_live.has(pixel) and bounds.has_point(pixel):
+				_mask_image.set_pixelv(pixel, live_color)
 				changed = true
+	_mask_live = next_live
 	if texture == null or texture.get_size() != Vector2(dimensions):
 		texture = ImageTexture.create_from_image(_mask_image)
 	elif changed:
 		texture.update(_mask_image)
 	_origin = Vector2.ZERO
-	extent = Vector2(dimensions) * ECONOMY.VISION_CELL
+	extent = Vector2(dimensions) * mask_world_cell()
 
 # Reconstruct the opening survey once; late snapshots must not expose
 # current enemy buildings, population or depleted ore outside live sight.
@@ -275,5 +302,5 @@ func draw(overlay: Control, bounds: Rect2, map_rect: Rect2, map_size: Vector2) -
 	overlay.draw_rect(Rect2(Vector2(0, inside.end.y), Vector2(bounds.size.x, bounds.end.y - inside.end.y)), dark)
 	overlay.draw_rect(Rect2(Vector2(0, inside.position.y), Vector2(inside.position.x, inside.size.y)), dark)
 	overlay.draw_rect(Rect2(Vector2(inside.end.x, inside.position.y), Vector2(bounds.end.x - inside.end.x, inside.size.y)), dark)
-	var source := Rect2(Vector2.ZERO, map_size / ECONOMY.VISION_CELL)
+	var source := Rect2(Vector2.ZERO, map_size / mask_world_cell())
 	overlay.draw_texture_rect_region(texture, map_rect, source)

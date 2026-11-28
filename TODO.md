@@ -12,6 +12,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.122.6: /reveal debug console command reveals the local match view only, including map/minimap, current sites, ships and asteroids; no authority visibility or command permission changes. Radial building territory base capped at 4200 world units independently of navigation sectors, reducing exact fog coverage workload. Completed station orbital belts provide exact rock-center cell visibility; distant visible rocks use batched subpixel markers. Fog mask texture capped at 1024 pixels per axis using coarse presentation cells, with exact logical visibility preserved. Regression fixture added. Static review only; FPS recovery, render and multiplayer verification pending.
+
 - [ ] v0.122.5: Unpaid defectors retain hull/crew/cargo, clear orders, flee as neutral and physically travel to the nearest surviving pirate base; only on arrival within 200 world units become members. Retarget on base loss; no bases leaves an orphan roaming pirate without reinforcement. Former-owner passage used only during escape; Imperial claim includes enclosing wall. Same-faction patrol gathering. Codex and recruitment regression coverage updated; runtime pending.
 
 - [ ] v0.122.4: One autonomous reinforcement per living pirate base every 120 simulation years, cap 12 faction hulls for autonomous spawns, three fighters then one cruiser in repeating cadence. No catch-up bursts or base respawn; destruction stops new reinforcements but surviving ships remain. Canonical roster, clock and counters replicate normally. Add cadence/cap/destruction and peer initialization tests; runtime pending.
