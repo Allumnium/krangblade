@@ -12,6 +12,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.122.0: First Imperial map implementation slice. Radial-only setup and fixed world geometry: symmetric home ring, central reserved planetary system at index player_count, two inner neutral rings (four neutral stars per player), starless outer frontier with seeded asteroid candidates. Minimum stellar spacing 30,000; inner radius at least 44,000; map radius at least 1.5× home radius plus existing four-belt edge clearance. Retain connected three-port graph, orbital belt counts/radii, protected inner Pulsars, deterministic generation and stable ordinary home indices. Central system is still neutral until Empire initialization/diplomacy integration; no Empire fleets/walls or pirate installations yet. Migrate map and peer fixtures, correct stale signed orbit test. Larger maps affect travel, territory/vision and performance; full runtime and balance validation pending.
+
 - [ ] v0.121.18: Verify full Planetary Defense System name in command description and compact PDS card label.
 
 - [ ] v0.121.17: Validate station construction/upgrade rows, repeat controls, Shipyard navigation, constructor Build/Return, placement/cancel/upgrade, custom hotkeys, mixed selection, parse and peers.

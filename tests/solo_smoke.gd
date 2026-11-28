@@ -249,7 +249,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if not (bool(session.call("start_solo", 3, [3, 2], [8, 4, 6], 827, "Grid"))):
+	if not (bool(session.call("start_solo", 3, [3, 2], [8, 4, 6], 827, "Radial"))):
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
@@ -262,7 +262,7 @@ func _run() -> void:
 		push_error("Solo smoke assertion failed at original line " + str(get_stack()[0]["line"]))
 		quit(1)
 		return
-	if setup["map"].get("layout") != "Grid":
+	if setup["map"].get("layout") != "Radial":
 		push_error("Explicit solo map layout not applied")
 		quit(1)
 		return

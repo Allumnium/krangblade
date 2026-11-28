@@ -1,5 +1,7 @@
 # Warbound — active thoughts
 
+- v0.122.0: First Imperial map implementation slice. Radial-only setup and fixed world geometry: symmetric home ring, central reserved planetary system at index player_count, two inner neutral rings (four neutral stars per player), starless outer frontier with seeded asteroid candidates. Minimum stellar spacing 30,000; inner radius at least 44,000; map radius at least 1.5× home radius plus existing four-belt edge clearance. Retain connected three-port graph, orbital belt counts/radii, protected inner Pulsars, deterministic generation and stable ordinary home indices. Central system is still neutral until Empire initialization/diplomacy integration; no Empire fleets/walls or pirate installations yet. Migrate map and peer fixtures, correct stale signed orbit test. Larger maps affect travel, territory/vision and performance; full runtime and balance validation pending.
+
 ## Imperial core and frontier redesign (2026-11-27; confirmed direction, implementation pending)
 
 - Confirmed: radial-only maps, increased stellar spacing, established AI Empire at exact map center with a fully walled system and fleets; symmetric equally spaced ordinary-player starts on one ring; neutral expansion stars concentrated inward toward the Empire; outer space primarily empty with asteroid fields, pirate bases and reserved room for future content.
