@@ -154,6 +154,8 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 	var sprite_vertices := PackedVector3Array()
 	var sprite_colors := PackedColorArray()
 	var sprite_uvs := PackedVector2Array()
+	var distant_metals := PackedVector2Array()
+	var distant_crystals := PackedVector2Array()
 	var pixel: Vector2 = Vector2(0.5, 0.5) / Vector2(ROCK_ATLAS.get_size())
 	for chunk in chunks:
 		var shape_key := Vector2i(field_index, int(chunk["id"]))
@@ -165,6 +167,16 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 		if rock_radius <= 0.0:
 			continue
 		var crystal: bool = chunk["resource"] == "Crystals"
+		# Map-scale markers prevent subpixel rocks from disappearing entirely.
+		# Physical sizes, mining targets and close-up sprite lighting are unchanged.
+		if rock_radius < 1.0:
+			if crystal:
+				distant_crystals.append(rock_pos - Vector2(0.65, 0.0))
+				distant_crystals.append(rock_pos + Vector2(0.65, 0.0))
+			else:
+				distant_metals.append(rock_pos - Vector2(0.65, 0.0))
+				distant_metals.append(rock_pos + Vector2(0.65, 0.0))
+			continue
 		if not asteroid_shape_cache.has(shape_key):
 			var spin_signature: float = sin(float(chunk["rotation"]) * 5.0)
 			var variety: float = fposmod(sin(Vector2(shape_key).dot(Vector2(0.013, 0.021))) * 43758.5453, 1.0)
@@ -191,6 +203,10 @@ func draw_asteroid_chunks(field: Dictionary, viewport_bounds: Rect2, render_scal
 			sprite_vertices.append(Vector3(point.x, point.y, 0.0))
 			sprite_colors.append(meta)
 			sprite_uvs.append(uvs[vertex])
+	if not distant_metals.is_empty():
+		map_canvas.draw_multiline(distant_metals, Color("#777b80"), 1.25)
+	if not distant_crystals.is_empty():
+		map_canvas.draw_multiline(distant_crystals, Color("#a76b85"), 1.25)
 	var sprites: ArrayMesh = _rock_mesh(sprite_vertices, sprite_colors, sprite_uvs)
 	_show_asteroid_mesh(map_canvas, field_index, sprites)
 

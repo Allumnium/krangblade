@@ -122,7 +122,7 @@ func order_hint(mouse: InputEventMouseButton, state: Dictionary, pending_command
 		if pending_command.is_empty() and node_hit < 0 and int(hint["entity"]) == -1:
 			nearest = 4.0
 			for index in range(count):
-				if not ECONOMY.discovered(state, local_player.call(), "planets", index):
+				if not fog_state.discovered(state, local_player.call(), "planets", index):
 					continue
 				var distance: float = mouse.position.distance_to(_minimap_point(graph["points"][index], area))
 				if distance < nearest:
@@ -153,7 +153,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 	var known: Array[bool] = []
 	for i in range(points.size()):
 		locations.append(_minimap_point(points[i], area))
-		known.append(ECONOMY.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
+		known.append(fog_state.discovered(state, viewer, "planets" if i < count else "fields", i if i < count else i - count))
 	territory_view.draw_claims(minimap, area.position, area.size)
 	for i in range(points.size()):
 		var tint := Color("#40566b")
@@ -177,7 +177,7 @@ func draw(selected: int, selected_units: Array[int], selected_field: int, select
 	if fog_state.texture != null:
 		var corner: Vector2 = _minimap_point(Vector2.ZERO, area)
 		var far: Vector2 = _minimap_point(map_size.call(), area)
-		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, map_size.call() / ECONOMY.VISION_CELL))
+		minimap.draw_texture_rect_region(fog_state.texture, Rect2(corner, far - corner), Rect2(Vector2.ZERO, map_size.call() / fog_state.mask_world_cell()))
 	# Mirror the main map's live hull visibility and interpolation; do not
 	# reveal undiscovered system ownership. Reuse this frame's pose cache and
 	# submit every hull dot as one triangle batch.

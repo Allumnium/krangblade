@@ -467,7 +467,7 @@ static func _spawn_starting_fleets(state: Dictionary, planets: Array, ordered: A
 
 static func _starting_survey_regions(map_data: Dictionary, planets: Array, ordered: Array[int]) -> Array:
 	var survey_regions: Array = []
-	var base_radius: float = sector_base_radius(map_data)
+	var base_radius: float = territory_base_radius(map_data)
 	for index in range(ordered.size()):
 		var weight: int = system_presence_weight(planets[index])
 		var development: float = clampf(float(weight) / 150.0, 0.0, 1.0)
@@ -479,6 +479,11 @@ static func _starting_survey_regions(map_data: Dictionary, planets: Array, order
 # Client presentation vision is separate from strategic route discovery.
 const VISION_CELL: float = 80.0
 const TERRITORY_VISION_MARGIN: float = 160.0
+const RADIAL_TERRITORY_BASE_RADIUS: float = 4200.0
+
+static func territory_base_radius(map_data: Dictionary) -> float:
+	# Strategic navigation sectors remain large; visual building claims do not.
+	return minf(RADIAL_TERRITORY_BASE_RADIUS, sector_base_radius(map_data)) if map_data.has("imperial_system") else sector_base_radius(map_data)
 
 static func territory_kernel_reach(base_radius: float, weight: int) -> float:
 	return base_radius * lerpf(1.12, 1.52, clampf(float(weight) / 150.0, 0.0, 1.0))
@@ -633,13 +638,14 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 	if ship_cache != null and ship_cache.get("base_points") == state["map"]["points"] and ship_cache.has("base_radius"):
 		base_radius = float(ship_cache["base_radius"])
 	else:
-		base_radius = sector_base_radius(state["map"])
+		base_radius = territory_base_radius(state["map"])
 		if ship_cache != null:
 			# Geometry is normally immutable; detach the key to detect replacements or edits.
 			ship_cache["base_points"] = (state["map"]["points"] as Array).duplicate()
 			ship_cache["base_radius"] = base_radius
 	var fixed_sources: Dictionary = {}
 	var moving_sources: Array[Vector2] = []
+	var belt_fields: Array = state["map"].get("fields", [])
 	var moving_radii: Array[float] = []
 	for index in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][index]
@@ -654,6 +660,10 @@ static func team_vision(state: Dictionary, team: int, ship_cache: Variant = null
 			else:
 				fixed_sources[point] = maxf(float(fixed_sources.get(point, 0.0)), radius)
 		if has_station(system):
+			# Owned orbital resources remain visible without expanding territorial claims.
+			if index < belt_fields.size() and int(belt_fields[index].get("anchor", -1)) == index and belt_fields[index].has("orbit_center"):
+				for rock in belt_fields[index].get("chunks", []):
+					cells[vision_cell(rock["position"])] = true
 			var station: Vector2 = station_position(state, index, elapsed)
 			if ship_cache == null:
 				_stamp_vision(cells, station, STATION_SIGHT)
@@ -1021,7 +1031,7 @@ static func _pirate_power(ship: Dictionary) -> float:
 
 static func _pirate_claims(state: Dictionary) -> Array:
 	var claims: Array = []
-	var base: float = sector_base_radius(state["map"])
+	var base: float = territory_base_radius(state["map"])
 	for index in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][index]
 		if int(system["owner"]) <= 0 or not has_station(system):
@@ -11909,7 +11919,7 @@ static func _explore_update_coverage(state: Dictionary, force: bool = false) -> 
 		for cell in sensors[group]:
 			mask = _explore_stamp(mask, dim, spacing, (Vector2(cell) + Vector2.ONE * 0.5) * VISION_CELL, float(sensors[group][cell]))
 		groups[group] = mask
-	var base_radius: float = sector_base_radius(state["map"])
+	var base_radius: float = territory_base_radius(state["map"])
 	for index in range(state["planets"].size()):
 		var system: Dictionary = state["planets"][index]
 		var group: int = _combat_group(state, int(system["owner"]))

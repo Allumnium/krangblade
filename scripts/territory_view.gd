@@ -48,7 +48,7 @@ func prepare_preview(map_data: Dictionary, players: Dictionary, ordered: Array[i
 	if map_data.is_empty() or ordered.is_empty():
 		return
 	_extent = (map_data["size"] as Vector2).max(Vector2.ONE)
-	_base_radius = ECONOMY.sector_base_radius(map_data)
+	_base_radius = ECONOMY.territory_base_radius(map_data)
 	var state: Dictionary = ECONOMY.create(map_data, players, ordered, false)
 	var palette_by_owner: Dictionary = {}
 	for index in range(ordered.size()):
@@ -123,7 +123,7 @@ func refresh(state: Dictionary, local_player: int, map_size: Vector2, empire_col
 		_minimap_texture = null
 		return false
 	if not is_same(region_graph, graph) or _viewer != local_player:
-		_base_radius = ECONOMY.sector_base_radius(state["map"])
+		_base_radius = ECONOMY.territory_base_radius(state["map"])
 		_region_cache.clear()
 		_spill_cache.clear()
 		_observed.clear()

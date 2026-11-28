@@ -283,6 +283,7 @@ func _ready() -> void:
 	theme = HUD.create()
 	session = get_node("/root/GameSession")
 	developer_tools.session = session
+	developer_tools.reveal_requested = _reveal_debug_map
 	session.connect("phase_changed", _refresh)
 	session.connect("status_changed", _refresh)
 	session.connect("economy_changed", _on_economy_changed)
@@ -1769,6 +1770,14 @@ var territory_view := TERRITORY_VIEW.new()
 var fog_overlay: Control
 var queued_order_overlay: Control
 
+func _reveal_debug_map() -> void:
+	if not OS.is_debug_build() or str(session.get("phase")) != "match":
+		return
+	fog_state.revealed = true
+	_refresh_territory(_state())
+	_refresh()
+	minimap.queue_redraw()
+
 func _update_fog(state: Dictionary) -> void:
 	fog_state.update(state, _me(), session.get("motion_revision"), Vector2.ZERO if state.is_empty() else _map_size())
 
@@ -1912,7 +1921,7 @@ func _draw_rock_selection(canvas: Control, rock: Dictionary, scale: float, posit
 
 # Names are static generated map geography, not live tactical information.
 func _ship_visible(state: Dictionary, ship: Dictionary) -> bool:
-	if state.get("eliminated", []).has(_me()):
+	if fog_state.revealed or state.get("eliminated", []).has(_me()):
 		return true
 	var team: int = ECONOMY.combat_group(state, _me())
 	if ECONOMY.shares_group_vision(state, team, ECONOMY.combat_group(state, int(ship["owner"]))):
@@ -1971,7 +1980,7 @@ func _field_toggle_input(event: InputEvent, key: String, button: Button) -> void
 
 func _toggle_field_command(key: String) -> void:
 	var state: Dictionary = _state()
-	if str(session.get("phase")) != "match" or state.is_empty() or selected_field < 0 or selected_rock >= 0 or not ECONOMY.discovered(state, _me(), "fields", selected_field):
+	if str(session.get("phase")) != "match" or state.is_empty() or selected_field < 0 or selected_rock >= 0 or not fog_state.discovered(state, _me(), "fields", selected_field):
 		return
 	var policy: Dictionary = ECONOMY.mining_policy(state, _me(), selected_field).duplicate()
 	var special: bool = bool(state["map"]["fields"][selected_field].get("antimatter", false))
@@ -2371,7 +2380,7 @@ func _set_rally_at(point: Vector2) -> void:
 	var graph: Dictionary = ECONOMY.military_graph(state)
 	var candidates: Array[int] = []
 	for index in range(state["planets"].size()):
-		if ECONOMY.discovered(state, _me(), "planets", index):
+		if fog_state.discovered(state, _me(), "planets", index):
 			candidates.append(index)
 	var world: Vector2 = _world_point(point)
 	var node: int = ECONOMY.sector_at(graph, world, candidates, selected)
@@ -2695,7 +2704,7 @@ func _planet() -> Dictionary:
 	var state: Dictionary = _state()
 	if state.is_empty() or selected < 0 or selected >= state["planets"].size():
 		return {}
-	if not ECONOMY.discovered(state, _me(), "planets", selected):
+	if not fog_state.discovered(state, _me(), "planets", selected):
 		return {}
 	return fog_state.system_view(state, selected, _map_size())
 
@@ -2833,7 +2842,7 @@ func _refresh() -> void:
 	if selected_field >= 0 and selected_rock >= 0 and (fog_state.rock_at(selected_field, selected_rock).is_empty() or not _fog_visible(fog_state.rock_at(selected_field, selected_rock).get("position", Vector2.INF))):
 		selected_field = -1
 		selected_rock = -1
-	var field_selected: bool = selected_field >= 0 and (selected_rock >= 0 or ECONOMY.discovered(state, _me(), "fields", selected_field))
+	var field_selected: bool = selected_field >= 0 and (selected_rock >= 0 or fog_state.discovered(state, _me(), "fields", selected_field))
 	var ship_selected: bool = not ship.is_empty()
 	if not ship_selected:
 		constructor_build_open = false
@@ -3223,7 +3232,7 @@ func _body_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var hit := Vector2i(-1, -1)
 	var nearest: float = INF
 	for index in range(state["planets"].size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index) or not _fog_visible(state["map"]["points"][index]):
+		if not fog_state.discovered(state, _me(), "planets", index) or not _fog_visible(state["map"]["points"][index]):
 			continue
 		var radius: float = _planet_radius(index, state)
 		if celestial_view.planet_detail_opacity(index, radius) < 0.3:
@@ -3247,7 +3256,7 @@ func _yard_hit(point: Vector2, state: Dictionary) -> Vector2i:
 	var nearest: float = INF
 	var elapsed: float = float(state["elapsed"])
 	for index in range(state["planets"].size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index):
+		if not fog_state.discovered(state, _me(), "planets", index):
 			continue
 		for slot in range(state["planets"][index]["yards"].size()):
 			var scale: float = _ship_scale(true) * pow(1.2, int(state["planets"][index]["yards"][slot]["level"]) - 1)
@@ -3270,7 +3279,7 @@ func _station_hit(point: Vector2, state: Dictionary) -> int:
 	var hit: int = -1
 	var nearest: float = INF
 	for index in range(state["planets"].size()):
-		if not ECONOMY.has_station(state["planets"][index]) or not _fog_visible(ECONOMY.station_position(state, index, float(state["elapsed"]))) or not ECONOMY.discovered(state, _me(), "planets", index):
+		if not ECONOMY.has_station(state["planets"][index]) or not _fog_visible(ECONOMY.station_position(state, index, float(state["elapsed"]))) or not fog_state.discovered(state, _me(), "planets", index):
 			continue
 		var center: Vector2 = _screen_point(ECONOMY.station_position(state, index, float(state["elapsed"])))
 		var distance: float = point.distance_to(center)
@@ -3405,7 +3414,7 @@ func _recall_control_group(number: int, additive: bool = false) -> void:
 
 func _building_valid(state: Dictionary, ref: Vector2i, kind: String, expected_count: int = -1) -> bool:
 	var planets: Array = state.get("planets", [])
-	if ref.x < 0 or ref.x >= planets.size() or ref.y < 0 or not ECONOMY.discovered(state, _me(), "planets", ref.x):
+	if ref.x < 0 or ref.x >= planets.size() or ref.y < 0 or not fog_state.discovered(state, _me(), "planets", ref.x):
 		return false
 	if not _fog_visible(state["map"]["points"][ref.x]):
 		return false
@@ -3464,7 +3473,7 @@ func _select_visible_buildings(state: Dictionary, first: Vector2i, kind: String)
 	building_selection_kind = kind
 	selected_buildings[first] = state["planets"][first.x]["yards"].size()
 	for index in range(state["planets"].size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index):
+		if not fog_state.discovered(state, _me(), "planets", index):
 			continue
 		var system: Dictionary = state["planets"][index]
 		if kind == "pds" and celestial_view.planet_detail_opacity(index, _planet_radius(index, state)) < 0.3:
@@ -3788,7 +3797,7 @@ func _select_at(point: Vector2, additive: bool = false, double_click: bool = fal
 	if selected_ship_id < 0 and selected_field < 0:
 		var closest: float = INF
 		for index in range(state["planets"].size()):
-			if not ECONOMY.discovered(state, _me(), "planets", index):
+			if not fog_state.discovered(state, _me(), "planets", index):
 				continue
 			var distance: float = point.distance_to(_screen_point(state["map"]["points"][index]))
 			if distance <= maxf(9.0, celestial_view.star_draw_radius(_planet_radius(index, state))) and distance < closest:
@@ -3879,7 +3888,7 @@ func _asteroid_hit(point: Vector2, state: Dictionary, mining: bool) -> Vector2i:
 	var scale: float = _fit() * camera.zoom
 	for index in range(state["map"].get("fields", []).size()):
 		var field: Dictionary = state["map"]["fields"][index]
-		var known: bool = ECONOMY.discovered(state, _me(), "fields", index)
+		var known: bool = fog_state.discovered(state, _me(), "fields", index)
 		var distance: float = point.distance_to(_screen_point(field["position"]))
 		if bool(field.get("antimatter", false)):
 			if known and distance <= maxf(9.0, float(field["radius"]) * scale * 0.16) and distance < best:
@@ -3952,7 +3961,7 @@ func _command_at(point: Vector2, force_position: bool = false, patrol: bool = fa
 		else:
 			var closest: float = INF
 			for index in range(state["planets"].size()):
-				if not ECONOMY.discovered(state, _me(), "planets", index):
+				if not fog_state.discovered(state, _me(), "planets", index):
 					continue
 				var distance: float = point.distance_to(_screen_point(state["map"]["points"][index]))
 				if distance <= maxf(9.0, celestial_view.star_draw_radius(_planet_radius(index, state))) and distance < closest:
@@ -4789,10 +4798,10 @@ func _follow_selection(state: Dictionary, poses: Dictionary, center_only: bool =
 			if _fog_visible(position):
 				position = MAP.asteroid_orbit_position(rock, MAP.asteroid_orbit_transforms(fields[selected_field], celestial_view.orbit_time(state)))
 			_center_world(position)
-		elif selected_rock < 0 and ECONOMY.discovered(state, _me(), "fields", selected_field):
+		elif selected_rock < 0 and fog_state.discovered(state, _me(), "fields", selected_field):
 			_center_world(fields[selected_field]["position"])
 		return
-	if selected >= 0 and selected < state["planets"].size() and ECONOMY.discovered(state, _me(), "planets", selected):
+	if selected >= 0 and selected < state["planets"].size() and fog_state.discovered(state, _me(), "planets", selected):
 		var system: Dictionary = state["planets"][selected]
 		var center: Vector2 = state["map"]["points"][selected]
 		if selected_yard >= 0 and selected_yard < system["yards"].size():
@@ -4931,7 +4940,7 @@ func _transfer_anchor(state: Dictionary, poses: Dictionary, refs: Dictionary, id
 	var ref: Dictionary = refs.get(id, {})
 	if ref.get("kind", "") == "station":
 		var node: int = int(ref["node"])
-		if not ECONOMY.discovered(state, _me(), "planets", node):
+		if not fog_state.discovered(state, _me(), "planets", node):
 			return Vector2.INF
 		return STRUCTURE_VIEW.bay_point(_screen_point(ECONOMY.station_position(state, node, float(state["elapsed"]))), _station_radius(), float(state["elapsed"]), resource, bay)
 	if not poses.has(id):
@@ -4961,7 +4970,7 @@ func _prepare_world_lighting(state: Dictionary, points: Array, poses: Dictionary
 	var radius: float = maxf(12.0, 10800.0 * render_scale)
 	var blockers: Array = []
 	for index in range(points.size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index) or not fog_state.is_explored(points[index], _map_size()):
+		if not fog_state.discovered(state, _me(), "planets", index) or not fog_state.is_explored(points[index], _map_size()):
 			continue
 		var pos: Vector2 = _screen_point(points[index])
 		if not bounds.grow(radius).has_point(pos):
@@ -5054,7 +5063,7 @@ func _draw_map_content() -> void:
 				if not rock.is_empty() and _fog_visible(rock["position"]):
 					_draw_rock_selection(map_canvas, rock, render_scale, MAP.asteroid_orbit_position(rock, transforms))
 			continue
-		if not ECONOMY.discovered(state, _me(), "fields", field_index):
+		if not fog_state.discovered(state, _me(), "fields", field_index):
 			if bool(field.get("antimatter", false)):
 				map_canvas.draw_string(font, center + Vector2(-10, 5), "?", HORIZONTAL_ALIGNMENT_CENTER, 20, 14, HUD.MUTED)
 			continue
@@ -5084,7 +5093,7 @@ func _draw_map_content() -> void:
 			continue
 	for i in range(points.size()):
 		var pos: Vector2 = _screen_point(points[i])
-		if not ECONOMY.discovered(state, _me(), "planets", i):
+		if not fog_state.discovered(state, _me(), "planets", i):
 			continue
 		var live: bool = _fog_visible(points[i])
 		var system: Dictionary = fog_state.system_view(state, i, _map_size())
@@ -5109,7 +5118,7 @@ func _draw_map_content() -> void:
 	_draw_salvage(state, poses, viewport_bounds, font)
 	var service_refs: Dictionary = _frame_service_refs(state)
 	for index in range(points.size()):
-		if not ECONOMY.discovered(state, _me(), "planets", index) or not _fog_visible(points[index]):
+		if not fog_state.discovered(state, _me(), "planets", index) or not _fog_visible(points[index]):
 			continue
 		var system: Dictionary = state["planets"][index]
 		var station: Dictionary = system.get("station", {})

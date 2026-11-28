@@ -3420,6 +3420,7 @@ func _initialize() -> void:
 		_test_combat_activity_fast_paths()
 		quit()
 		return
+	_test_radial_territory_and_reveal()
 	_test_vision_span_stamping()
 	_test_mining_selection()
 	if OS.get_cmdline_user_args().has("--mining-selection-only"):
@@ -7657,6 +7658,26 @@ func _test_ai_strategic_diplomacy() -> void:
 	assert(ECON._ai_diplomacy_turn(fresh, 1))
 	assert(ECON.empires_allied(fresh, 1, 2) and ECON.empires_hostile(fresh, 2, 3))
 	print("PASS: strategic AI opening, intervention risk, overextension, truce and mutual alliance")
+
+func _test_radial_territory_and_reveal() -> void:
+	var map: Dictionary = MAP.generate(827, 2)
+	var state: Dictionary = ECON.create(map, {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	assert(ECON.territory_base_radius(map) <= ECON.RADIAL_TERRITORY_BASE_RADIUS)
+	assert(ECON.territory_base_radius(map) < ECON.sector_base_radius(map))
+	var cells: Dictionary = ECON.team_vision(state, 1)
+	for rock in map["fields"][0]["chunks"]:
+		assert(cells.has(ECON.vision_cell(rock["position"])))
+	var fog = preload("res://scripts/fog_of_war.gd").new()
+	fog.update(state, 1, 0, map["size"])
+	assert(fog.texture != null and maxf(fog.texture.get_width(), fog.texture.get_height()) <= 1024.0)
+	var authority_state: Dictionary = state.duplicate(true)
+	fog.revealed = true
+	fog.update(state, 1, 0, map["size"])
+	assert(fog.observing and fog.texture == null)
+	assert(fog.discovered(state, 1, "planets", 1))
+	assert(fog.is_visible(map["points"][1], map["size"]))
+	assert(state == authority_state)
+	print("PASS: radial territory scale, home belt sight, bounded fog mask and local reveal")
 
 func _test_vision_span_stamping() -> void:
 	var sources: Dictionary = {Vector2i(0, 0): 1000.0, Vector2i(3, -2): 1000.0, Vector2i(-40, 7): 2700.0, Vector2i(5, 1): 850.0, Vector2i(120, 90): 1100.0, Vector2i(-3, -60): 1500.0, Vector2i(30, 30): 1234.5}
