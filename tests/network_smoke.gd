@@ -189,6 +189,10 @@ func _phase_changed() -> void:
 		if state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial and craft["kind"] == "wall_segment").size() != ECON.IMPERIAL_WALL_SEGMENTS:
 			_fail("Imperial perimeter missing.")
 			return
+		var imperial_patrols: Array = state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial and ECON.military_hull(str(craft["kind"])))
+		if imperial_patrols.size() != 20 or not imperial_patrols.all(func(craft: Dictionary) -> bool: return craft.get("unit_order", {}).get("kind") == "patrol" and not bool(craft.get("holding", false))):
+			_fail("Imperial military patrol roster missing.")
+			return
 		var pirate_bases: Array = state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "pirate_base")
 		if pirate_bases.size() != clampi(expected_players + 1, 3, 5) or not state.has("pirate_next_reinforcement"):
 			_fail("Pirate base roster or reinforcement schedule missing.")
