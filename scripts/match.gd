@@ -151,9 +151,9 @@ var notice_ui := MATCH_NOTICE_UI.new()
 var station_commands: VBoxContainer
 var station_primary_grid: GridContainer
 var station_select_yards_button: Button
-var build_select_yards_button: Button
 var station_upgrade_buttons: Dictionary = {}
-var station_build_grid: GridContainer
+var constructor_build_grid: GridContainer
+var constructor_build_open: bool = false
 var station_trade: VBoxContainer
 var station_trade_back: Button
 var station_build_buttons: Dictionary = {}
@@ -977,7 +977,7 @@ func _layout_command_grids() -> void:
 	var slot_width: float = maxf(36.0, floorf((inspector_panel.custom_minimum_size.x - padding.x - 9.0) / 4.0))
 	var slot_height: float = floorf((inspector_slot.size.y - padding.y - 9.0) / 4.0) if inspector_slot.size.y > 0.0 else 52.0
 	var slot_size := Vector2(slot_width, maxf(32.0, slot_height))
-	for grid in [command_card, field_command_grid, yard_command_grid, station_primary_grid, station_build_grid]:
+	for grid in [command_card, field_command_grid, yard_command_grid, station_primary_grid, constructor_build_grid]:
 		if not is_instance_valid(grid):
 			continue
 		for slot in grid.get_children():
@@ -1179,8 +1179,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	command_card_ui.set_face(station_button, "Station", command_card_ui.icon("select_station"))
 	command_card_ui.set_hint(station_button, "Select parent station")
 	hotkeys.register(station_button, KEY_Z, "Shipyard", "yard_station", "Select Space Station")
-	var build_button: Button = _station_button(grid, "Build", "build", _select_yard_station.bind(true))
-	hotkeys.register(build_button, KEY_B, "Shipyard", "yard_station_build", "Station Build")
+	var station_spacer: Control = command_card_ui.add_spacer(grid)
 	var clear := _button("", func() -> void:
 		pending_command = ""
 		_refresh_command_mode()
@@ -1198,7 +1197,7 @@ func _build_yard_command_card(parent: VBoxContainer) -> void:
 	grid.add_child(rally_button)
 	yard_commands["rally"] = rally_button
 	hotkeys.register(rally_button, KEY_Y, "Shipyard", "yard_rally", "Rally")
-	yard_bottom_slots.assign([station_button, build_button, clear, rally_button])
+	yard_bottom_slots.assign([station_button, station_spacer, clear, rally_button])
 	_layout_yard_classes(1, true, false)
 	yard_command_scroll.hide()
 
@@ -1234,12 +1233,9 @@ func _layout_yard_classes(level: int, show_medium_upgrade: bool, show_large_upgr
 		if ordered[i].get_index() != i:
 			yard_command_grid.move_child(ordered[i], i)
 
-func _select_yard_station(open_build: bool = false) -> void:
+func _select_yard_station() -> void:
 	# For grouped yards, select the primary yard's parent station.
 	_select_building_ref(Vector2i(selected, 0), "station")
-	# Selecting refreshes the inspector and resets the station card.
-	if open_build and station_selected_index == selected and station_commands.visible:
-		_station_card_to("build")
 
 # Shared command-card art. Keep silhouettes legible at compact native UI sizes.
 func _station_button(grid: GridContainer, caption: String, key: String, action: Callable) -> Button:
@@ -1257,7 +1253,24 @@ func _build_station_command_card(parent: Container) -> void:
 	station_commands.alignment = BoxContainer.ALIGNMENT_BEGIN
 	parent.add_child(station_commands)
 	station_primary_grid = command_card_ui.create_grid(station_commands)
-	for i in range(4):
+	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Shipyard"}
+	for resource in ECONOMY.RESOURCES:
+		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
+	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds", "yard"]:
+		var button: Button = _station_button(station_primary_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
+		station_build_buttons[key] = button
+		hotkeys.register(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_P, "yard": KEY_X}[key], "Station", "build_" + key, captions[key].replace("\n", " "))
+		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing", "pds", "yard"]:
+			button.gui_input.connect(_station_repeat_input.bind(key, button))
+			var border := Control.new()
+			border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			button.add_child(border)
+			border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			border.draw.connect(_draw_autobuild_border.bind(border))
+			border.hide()
+			button.set_meta("auto_border", border)
+	# Reserve the first two rows for construction and the third for upgrades.
+	for i in range(8 - (ECONOMY.RESOURCES.size() + 4)):
 		command_card_ui.add_spacer(station_primary_grid)
 	station_upgrade_buttons["reinforced_plating"] = _station_button(station_primary_grid, "Plating", "reinforced_plating", _station_upgrade_pressed.bind("reinforced_plating"))
 	station_upgrade_buttons["laser_matrix"] = _station_button(station_primary_grid, "Lasers", "laser_matrix", _station_upgrade_pressed.bind("laser_matrix"))
@@ -1270,40 +1283,12 @@ func _build_station_command_card(parent: Container) -> void:
 	dyson_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	station_upgrade_buttons["dyson_sphere"] = dyson_button
 	command_card_ui.add_spacer(station_primary_grid)
-	for i in range(4):
-		command_card_ui.add_spacer(station_primary_grid)
-	# Bottom row: Select Shipyards, Build, Trade, empty.
+	# Bottom row: Shipyards, empty, Trade, empty.
 	station_select_yards_button = _station_button(station_primary_grid, "Shipyards", "yard", _station_select_yards)
 	hotkeys.register(station_select_yards_button, KEY_Z, "Station", "station_port_1", "Select Shipyards")
-	hotkeys.register(_station_button(station_primary_grid, "Build", "build", _station_card_to.bind("build")), KEY_B, "Station", "station_build", "Build")
+	command_card_ui.add_spacer(station_primary_grid)
 	hotkeys.register(_station_button(station_primary_grid, "Trade", "trade", _station_card_to.bind("trade")), KEY_T, "Station", "station_trade", "Trade")
 	command_card_ui.add_spacer(station_primary_grid)
-	station_build_grid = command_card_ui.create_grid(station_commands)
-	var captions: Dictionary = {"warehouse": "Warehouse", "housing": "Habitation", "pds": "PDS", "yard": "Shipyard"}
-	for resource in ECONOMY.RESOURCES:
-		captions[resource] = str(ECONOMY.ECONOMY_BUILDINGS[resource]["name"]).replace(" ", "\n")
-	for key in ECONOMY.RESOURCES + ["warehouse", "housing", "pds", "yard"]:
-		var button: Button = _station_button(station_build_grid, captions[key], "habitation" if key == "housing" else key, _station_build.bind(key))
-		station_build_buttons[key] = button
-		hotkeys.register(button, {"Metals": KEY_R, "Organics": KEY_G, "Crystals": KEY_C, "warehouse": KEY_W, "housing": KEY_H, "pds": KEY_T, "yard": KEY_X}[key], "Station Build", "build_" + key, captions[key].replace("\n", " "))
-		if key in ECONOMY.RESOURCES or key in ["warehouse", "housing", "pds", "yard"]:
-			button.gui_input.connect(_station_repeat_input.bind(key, button))
-			var border := Control.new()
-			border.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			button.add_child(border)
-			border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-			border.draw.connect(_draw_autobuild_border.bind(border))
-			border.hide()
-			button.set_meta("auto_border", border)
-	# Keep the fixed four-row grid and Return position with fewer resource cards.
-	for i in range(8 - ECONOMY.RESOURCES.size()):
-		command_card_ui.add_spacer(station_build_grid)
-	# Bottom row: Shipyards, two empty slots, Return.
-	build_select_yards_button = _station_button(station_build_grid, "Shipyards", "yard", _station_select_yards)
-	hotkeys.register(build_select_yards_button, KEY_Z, "Station Build", "build_select_yards", "Select Shipyards")
-	for i in range(2):
-		command_card_ui.add_spacer(station_build_grid)
-	hotkeys.register(_station_button(station_build_grid, "Return", "return", _station_card_to.bind("primary")), KEY_ESCAPE, "Station Build", "build_return", "Return")
 	station_trade = VBoxContainer.new()
 	station_trade.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	station_commands.add_child(station_trade)
@@ -1316,7 +1301,6 @@ func _station_card_to(card: String) -> void:
 
 func _sync_station_card() -> void:
 	station_primary_grid.visible = station_card == "primary"
-	station_build_grid.visible = station_card == "build"
 	station_trade.visible = station_card == "trade"
 	_layout_right_panel()
 
@@ -1373,11 +1357,9 @@ func _refresh_station_primary(p: Dictionary, owned: bool) -> void:
 	var state: Dictionary = _state()
 	for index in _owned_station_selection(state):
 		yard_count += state["planets"][index]["yards"].size()
-	for shortcut in [station_select_yards_button, build_select_yards_button]:
-		var button: Button = shortcut
-		button.disabled = not owned or yard_count == 0
-		command_card_ui.set_hint(button, "Select all %d completed shipyards at selected stations" % yard_count)
-		(button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if button.disabled else Color.WHITE
+	station_select_yards_button.disabled = not owned or yard_count == 0
+	command_card_ui.set_hint(station_select_yards_button, "Select all %d completed shipyards at selected stations" % yard_count)
+	(station_select_yards_button.get_meta("portrait") as TextureRect).modulate = Color(0.55, 0.55, 0.55) if station_select_yards_button.disabled else Color.WHITE
 	for kind in station_upgrade_buttons:
 		var button: Button = station_upgrade_buttons[kind]
 		if kind == "dyson_sphere":
@@ -2042,7 +2024,7 @@ func _command_slot(id: String, hint: String, action: Callable, existing_slot: Co
 	active_border.draw.connect(_draw_active_command.bind(active_border))
 	active_border.visible = false
 	button.set_meta("active_border", active_border)
-	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y, "build_cannon": KEY_I, "upgrade_cannon": KEY_O, "build_wall": KEY_Z}[id], "Fleet", "fleet_" + id, hint)
+	hotkeys.register(button, {"move": KEY_M, "stop": KEY_S, "hold": KEY_H, "patrol": KEY_P, "attack": KEY_A, "load": KEY_L, "unload": KEY_D, "repair": KEY_R, "auto_explore": KEY_X, "auto_wander": KEY_W, "auto_mine": KEY_G, "auto_salvage": KEY_V, "auto_repair": KEY_B, "auto_trade": KEY_T, "auto_farm": KEY_N, "deliver_farm": KEY_E, "collect": KEY_C, "guard": KEY_U, "transform": KEY_J, "auto_retreat": KEY_K, "scan": KEY_Q, "build_depot": KEY_F, "cancel_site": KEY_Y, "build_cannon": KEY_I, "upgrade_cannon": KEY_O, "build_wall": KEY_Z, "build": KEY_B}[id], "Construction Build" if id in ["build_depot", "build_cannon", "build_wall"] else "Fleet", "fleet_" + id, hint)
 	return button
 
 func _build_command_card(parent: VBoxContainer) -> void:
@@ -2081,11 +2063,29 @@ func _build_command_card(parent: VBoxContainer) -> void:
 
 	# Science vessels cannot load cargo; Scan shares that existing slot.
 	_command_slot("scan", "Scan · launch a cloaked reconnaissance probe", _arm_command.bind("scan"), command_card.get_child(5)).hide()
-	_command_slot("build_depot", "Build Resource Depot · 600 Metals, 40 Crystals", _arm_command.bind("build_depot"), command_card.get_child(4)).hide()
+	var build: Button = _command_slot("build", "Build static structures", _constructor_card_to.bind(true), command_card.get_child(4))
+	command_card_ui.set_face(build, "Build", command_card_ui.icon("build"))
+	build.hide()
 	_command_slot("cancel_site", "Cancel unfinished construction", _arm_command.bind("cancel_site"), command_card.get_child(8)).hide()
-	_command_slot("build_cannon", "Build Defense Cannon · 500 Metals, 60 Crystals", _arm_command.bind("build_cannon"), command_card.get_child(3)).hide()
 	_command_slot("upgrade_cannon", "Upgrade completed Defense Cannon", _arm_command.bind("upgrade_cannon"), command_card.get_child(7)).hide()
-	_command_slot("build_wall", "Build Wall · click node or drag a connected chain", _arm_command.bind("build_wall"), command_card.get_child(9)).hide()
+	constructor_build_grid = command_card_ui.create_grid(parent)
+	for entry in [["build_depot", "Resource\nDepot", "Build Resource Depot · 600 Metals, 40 Crystals"], ["build_cannon", "Defense\nCannon", "Build Defense Cannon · 500 Metals, 60 Crystals"], ["build_wall", "Wall", "Build Wall · click node or drag a connected chain"]]:
+		var id: String = entry[0]
+		var button: Button = _command_slot(id, entry[2], _arm_command.bind(id), command_card_ui.add_spacer(constructor_build_grid))
+		command_card_ui.set_face(button, entry[1], command_card_ui.icon(id))
+	while constructor_build_grid.get_child_count() < 15:
+		command_card_ui.add_spacer(constructor_build_grid)
+	hotkeys.register(_station_button(constructor_build_grid, "Return", "return", _constructor_card_to.bind(false)), KEY_ESCAPE, "Construction Build", "constructor_build_return", "Return")
+	constructor_build_grid.hide()
+
+func _constructor_card_to(open: bool) -> void:
+	constructor_build_open = open and command_kind == "construction_ship"
+	pending_command = ""
+	wall_drag_start = Vector2.INF
+	wall_drag_end = Vector2.INF
+	command_card.visible = not command_kind.is_empty() and not constructor_build_open
+	constructor_build_grid.visible = constructor_build_open
+	_refresh_command_mode()
 
 func _autocast_units(state: Dictionary, mode: String) -> Array:
 	var units: Array = []
@@ -2546,7 +2546,8 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 	ship_population.text = ("Total crew: " if multiple else "Crew: ") + UI_TEXT.crew_text(selected_crew)
 	ship_population.get_parent().show()
 	_sync_command_kind(state)
-	command_card.visible = not command_kind.is_empty()
+	command_card.visible = not command_kind.is_empty() and not constructor_build_open
+	constructor_build_grid.visible = constructor_build_open
 	loaded_owned = false
 	var combat_owned: bool = false
 	var can_load: bool = false
@@ -2566,7 +2567,7 @@ func _refresh_ship_panels(state: Dictionary, ship: Dictionary) -> void:
 		var button: Button = command_buttons[id]
 		button.visible = (id != "repair" or has_repairers) and (id not in ["load", "unload"] or has_cargo_hold)
 		button.disabled = command_kind.is_empty() or owned_count == 0 or (id == "attack" and not combat_owned) or (id == "patrol" and not _selected_ship_entries(state).any(func(craft: Dictionary) -> bool: return _command_entry(craft) and craft["kind"] in ECONOMY.MILITARY_KINDS)) or (id == "repair" and not has_repairers) or (id == "load" and not can_load) or (id == "unload" and not loaded_owned)
-	for build_id in ["build_depot", "cancel_site", "build_cannon", "upgrade_cannon", "build_wall"]:
+	for build_id in ["build", "build_depot", "cancel_site", "build_cannon", "upgrade_cannon", "build_wall"]:
 		command_buttons[build_id].visible = command_kind == "construction_ship"
 		command_buttons[build_id].disabled = not command_buttons[build_id].visible or owned_count == 0
 	if command_kind == "construction_ship":
@@ -2834,6 +2835,9 @@ func _refresh() -> void:
 		selected_rock = -1
 	var field_selected: bool = selected_field >= 0 and (selected_rock >= 0 or ECONOMY.discovered(state, _me(), "fields", selected_field))
 	var ship_selected: bool = not ship.is_empty()
+	if not ship_selected:
+		constructor_build_open = false
+		constructor_build_grid.hide()
 	if not ship_selected and not field_selected and p.is_empty():
 		camera.following = false
 	var other_selected: bool = ship_selected or field_selected
@@ -4017,6 +4021,7 @@ func _command_kinds(state: Dictionary) -> Array[String]:
 func _sync_command_kind(state: Dictionary) -> void:
 	var kinds: Array[String] = _command_kinds(state)
 	if command_selection != selected_units or not kinds.has(command_kind):
+		constructor_build_open = false
 		command_selection.assign(selected_units)
 		command_kind = kinds[0] if not kinds.is_empty() else ""
 
@@ -4062,6 +4067,7 @@ func _cycle_command_kind(reverse: bool) -> bool:
 	if kinds.size() < 2:
 		return false
 	command_kind = kinds[posmod(kinds.find(command_kind) + (-1 if reverse else 1), kinds.size())]
+	constructor_build_open = false
 	pending_command = ""
 	formation_button = 0
 	_refresh()
