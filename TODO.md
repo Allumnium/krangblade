@@ -2,6 +2,8 @@
 
 ## Approved command and observation changes (2026-11-27)
 
+- [ ] v0.121.16: Verify opposing orbital cohorts, smooth motion, mining/replica alignment, authored command ghosts at all headings and zooms, vector fallback, fog visibility, parse and peer smoke.
+
 - [ ] v0.121.15: Validate doubled actual orbital radii and counts, four-radius edge margin in all layouts, compact replica generation, longer travel and mining economics, fog mask size/overview FPS and peers; verify no planet→station production pods and retained upgrade deliveries.
 
 - [ ] v0.121.14: Verify linear world-space hull/structure/celestial sizes across zoom and map dimensions, constant flag pixels, hit tolerance and cargo placement, subpixel rendering without polygon errors, overview FPS with full sprite batches, full parse and peer smoke.

@@ -408,7 +408,7 @@ static func asteroid_orbit_transforms(field: Dictionary, elapsed: float) -> Arra
 		return transforms
 	var phase: float = maxf(0.0, elapsed) * float(field["orbit_rate"])
 	var center: Vector2 = field["orbit_center"]
-	for factor in [0.9, 1.0, 1.1]:
+	for factor in [-1.1, 0.55, 1.1]:
 		transforms.append(Transform2D(fposmod(phase * float(factor), TAU), center))
 	return transforms
 
