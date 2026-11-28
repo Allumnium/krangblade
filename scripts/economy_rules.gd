@@ -94,6 +94,7 @@ const ROGUE_GRACE_YEARS: float = 60.0
 const ROGUE_CHECK_YEARS: float = 10.0
 const ROGUE_CHANCE: float = 0.005
 const PIRATE_OWNER: int = -1
+const PIRATE_BASE_HP: float = 500.0
 const IMPERIAL_OWNER_START: int = 2147482999
 const IMPERIAL_START_GC: float = 10000.0
 const IMPERIAL_WALL_SEGMENTS: int = 96
@@ -216,7 +217,7 @@ const SHIP_KINDS = ["ship", "colony_ship", "fighter", "miner", "science_ship", "
 const CONSTRUCTION_SHIP_CAPACITY: float = 20.0
 const DEPOT_REFERENCE_BUDGET: float = 400.0
 const ANTIMATTER_HOLDER_CAPACITY: float = 1.0
-const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon", "wall_node", "wall_segment"]
+const STATIC_SITE_KINDS = ["resource_depot", "defense_cannon", "wall_node", "wall_segment", "pirate_base"]
 const WALL_MAX_LENGTH: float = 112.5
 const WALL_SNAP_RADIUS: float = 10.0
 const WALL_MIN_SEGMENT_LENGTH: float = 3.0
@@ -939,6 +940,46 @@ static func _pay_fleet_upkeep(state: Dictionary, dt: float, wage_tables: Diction
 # A seeded roll per hull and period, independent of simulation frame rate.
 # Pirates do not join teams, diplomacy, the economy or objective scoring.
 # Strategy is host-only and refreshed on a coarse clock. No new RPC.
+# Static pirate installations use regular destructible hulls. Their base ID
+# also identifies the faction; a destroyed base is never recreated.
+static func initialize_frontier_pirates(state: Dictionary) -> bool:
+	if state.has("frontier_pirates_initialized"):
+		return false
+	var home_count: int = int(state["map"].get("player_count", 0))
+	if home_count < 1 or not state["map"].has("imperial_system"):
+		return false
+	state["frontier_pirates_initialized"] = true
+	var center: Vector2 = state["map"]["size"] * 0.5
+	var home_radius: float = center.distance_to(state["map"]["points"][0])
+	var outer_radius: float = minf(center.x, center.y)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(state["map"]["seed"]) + 472901
+	var count: int = clampi(home_count + 1, 3, 5)
+	var rotation: float = rng.randf_range(0.0, TAU)
+	for slot in range(count):
+		var angle: float = rotation + TAU * float(slot) / float(count)
+		var radius: float = lerpf(home_radius, outer_radius, rng.randf_range(0.60, 0.85))
+		var point: Vector2 = center + Vector2.from_angle(angle) * radius
+		var origin: int = 0
+		for home in range(1, home_count):
+			if point.distance_squared_to(state["map"]["points"][home]) < point.distance_squared_to(state["map"]["points"][origin]):
+				origin = home
+		var base: Dictionary = _spawn_completed_structure(state, PIRATE_OWNER, origin, point, "pirate_base")
+		base["pirate_faction"] = int(base["id"])
+		for hull_slot in range(5):
+			var kind: String = "cruiser" if hull_slot == 0 else "fighter"
+			_spawn_pirate_hull(state, base, kind, hull_slot)
+	return true
+
+static func _spawn_pirate_hull(state: Dictionary, base: Dictionary, kind: String, slot: int) -> Dictionary:
+	var id: int = int(state["next_id"])
+	state["next_id"] = id + 1
+	var point: Vector2 = (base["position"] as Vector2) + Vector2.from_angle(float(slot) * 2.399963) * (120.0 + float(slot % 3) * 30.0)
+	var hull: Dictionary = {"id": id, "kind": kind, "owner": PIRATE_OWNER, "origin": int(base["origin"]), "at": int(base["at"]), "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": float(CREW_COSTS[kind]), "cargo": empty_stock(), "hp": ship_max_hp(kind), "field": -1, "mining_mode": "idle", "field_leg": 0.0, "rogue": true, "pirate_phase": "roam", "pirate_faction": int(base["id"]), "pirate_goal": point}
+	state["ships"].append(hull)
+	_register_indexed_hull(state, hull)
+	return hull
+
 static func _pirate_power(ship: Dictionary) -> float:
 	var kind: String = str(ship.get("kind", ""))
 	var strength: float = float({"miner": 0.25, "scout": 0.4, "fighter": 1.0, "cruiser": 5.0, "destroyer": 9.0, "railgun_ship": 5.0}.get(kind, 0.0))
@@ -1006,6 +1047,8 @@ static func _pirate_pick_target(point: Vector2, power: float, targets: Array, ce
 	for i in range(samples):
 		var target: Dictionary = targets[(start + i) % targets.size()]
 		var location: Vector2 = target["position"]
+		if _pirate_claim_depth(location, claims, 100.0) > EPS:
+			continue
 		var defense: float = _pirate_defense(location, cells, claims)
 		if defense * 1.5 > power:
 			continue
@@ -1082,7 +1125,7 @@ static func _pirate_gather_group(leader: Dictionary, cell: Vector2i, pirate_cell
 				var mate_id: int = int(mate["id"])
 				if group.size() >= 12:
 					break
-				if assigned.has(mate_id) or center.distance_squared_to(mate["position"]) > PIRATE_GROUP_RANGE * PIRATE_GROUP_RANGE:
+				if assigned.has(mate_id) or int(mate.get("pirate_faction", -1)) != int(leader.get("pirate_faction", -1)) or center.distance_squared_to(mate["position"]) > PIRATE_GROUP_RANGE * PIRATE_GROUP_RANGE:
 					continue
 				assigned[mate_id] = true
 				group.append(mate)
@@ -5578,7 +5621,7 @@ static func missile_count(kind: String) -> int:
 static func railgun_count(kind: String) -> int:
 	return 1 if kind in ["destroyer", "railgun_ship"] else 0
 
-const SHIP_MAX_HP = {"resource_depot": DEPOT_HP, "construction_ship": 50.0, "defense_cannon": 100.0, "wall_node": WALL_NODE_HP, "wall_segment": WALL_SEGMENT_HP, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 160.0, "destroyer": 320.0, "railgun_ship": 140.0, "warp_gate": WARP_GATE_HP}
+const SHIP_MAX_HP = {"pirate_base": PIRATE_BASE_HP, "resource_depot": DEPOT_HP, "construction_ship": 50.0, "defense_cannon": 100.0, "wall_node": WALL_NODE_HP, "wall_segment": WALL_SEGMENT_HP, "probe": PROBE_HP, "ship": FREIGHTER_HP, "scout": SHIP_HP * 0.5, "cruiser": 160.0, "destroyer": 320.0, "railgun_ship": 140.0, "warp_gate": WARP_GATE_HP}
 const MILITARY_KINDS = ["fighter", "scout", "cruiser", "destroyer", "railgun_ship"]
 const ARMED_KINDS = ["fighter", "miner", "cruiser", "destroyer", "scout", "railgun_ship"]
 

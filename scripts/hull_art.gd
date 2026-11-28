@@ -228,6 +228,8 @@ func portrait_points(vertices: Array, factor: float = 1.0) -> String:
 	return " ".join(coordinates)
 
 func ui_radius(kind: String) -> float:
+	if kind == "pirate_base":
+		return 30.0
 	return float({"ship": 32.0, "cruiser": 27.0, "destroyer": 46.0, "railgun_ship": 33.0, "warp_gate": 44.0}.get(kind, 15.0))
 
 func portrait_scale(kind: String) -> float:
@@ -243,6 +245,8 @@ func texture_half_size(kind: String) -> float:
 	return 50.0 if kind == "destroyer" else 40.0
 
 func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
+	if kind == "pirate_base":
+		kind = "resource_depot"
 	if has_authored_sprite(kind):
 		return sprite_texture(kind, tint)
 	var key: String = "%s:%s:%d" % [kind, tint.to_html(false), pixels]
@@ -264,6 +268,8 @@ func production_icon(kind: String, tint: Color, pixels: int = 64) -> Texture2D:
 	return production_icons[key]
 
 func selection_portrait_icon(kind: String) -> Texture2D:
+	if kind == "pirate_base":
+		kind = "resource_depot"
 	if has_authored_sprite(kind) and not selection_portrait_icons.has(kind):
 		# Preserve the existing health-tinted portrait contract using the new art.
 		var source: Image = sprite_image(kind)
@@ -315,6 +321,8 @@ func selection_portrait_icon(kind: String) -> Texture2D:
 	return selection_portrait_icons[kind]
 
 func hull_texture(kind: String, empire: Color, detailed: bool) -> Texture2D:
+	if kind == "pirate_base":
+		kind = "resource_depot"
 	if has_authored_sprite(kind):
 		return sprite_texture(kind, empire)
 	var key: String = "%s:%s:%s" % [kind, empire.to_html(false), str(detailed)]
