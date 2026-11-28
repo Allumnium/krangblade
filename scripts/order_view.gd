@@ -40,6 +40,13 @@ func draw_destination_ghost(kind: String, point: Vector2, heading: Vector2, tint
 	var axis: Vector2 = heading.normalized() if not heading.is_zero_approx() else Vector2.UP
 	var base_scale: float = ship_scale.call(false)
 	var scale: float = (base_scale if exact_scale else maxf(0.42, base_scale)) * HULL_ART.visual_scale(kind)
+	if HULL_ART.has_authored_sprite(kind):
+		var texture: Texture2D = hull_art.hull_texture(kind, tint, true)
+		var half: float = hull_art.texture_half_size(kind) * scale
+		surface.draw_set_transform(point, axis.angle() + HULL_ART.sprite_heading_offset(kind))
+		surface.draw_texture_rect(texture, Rect2(Vector2(-half, -half), Vector2(half * 2.0, half * 2.0)), false, Color(tint.lightened(0.35), 0.65))
+		surface.draw_set_transform(Vector2.ZERO)
+		return
 	var shape: PackedVector2Array = hull_art.polygon(point, axis * scale, axis.orthogonal() * scale, HULL_ART.HULL_OUTLINES.get(kind, HULL_ART.FREIGHTER_OUTLINE))
 	_draw_ghost_polygon(surface, shape, tint)
 
