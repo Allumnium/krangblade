@@ -96,6 +96,8 @@ const ROGUE_CHANCE: float = 0.005
 const PIRATE_OWNER: int = -1
 const IMPERIAL_OWNER_START: int = 2147482999
 const IMPERIAL_START_GC: float = 10000.0
+const IMPERIAL_WALL_SEGMENTS: int = 96
+const IMPERIAL_WALL_CLEARANCE: float = 300.0
 const IMPERIAL_COLOR := Color("#d8ad64")
 const PIRATE_COMBAT_GROUP: int = 2147483000
 const PIRATE_DECISION_YEARS: float = 3.0
@@ -360,10 +362,41 @@ static func initialize_imperial_core(state: Dictionary) -> bool:
 	for slot in range(int(system.get("planet_count", 0))):
 		system["pds"][slot] = _new_pds()
 	_spawn_imperial_fleet(state, index, system)
+	_spawn_imperial_perimeter(state, index, owner)
 	return true
 
 static func is_imperial_owner(state: Dictionary, owner: int) -> bool:
 	return owner > 0 and owner == int(state.get("imperial_owner", 0))
+
+# Bootstrap completed structures with the same canonical hull representation
+# as constructed sites. No player material reservations or placement RPC.
+static func _spawn_completed_structure(state: Dictionary, owner: int, origin: int, point: Vector2, kind: String) -> Dictionary:
+	var id: int = int(state["next_id"])
+	state["next_id"] = id + 1
+	var site: Dictionary = {"id": id, "kind": kind, "owner": owner, "origin": origin, "at": origin, "position": point, "navigation_target": point, "heading": Vector2.UP, "route": [], "leg": 0.0, "source": -1, "dest": -1, "crew": 0.0, "cargo": empty_stock(), "hp": ship_max_hp(kind), "build_progress": 1.0, "build_recipe": {}, "build_reservations": {}, "build_delivered": empty_stock()}
+	state["ships"].append(site)
+	_register_indexed_hull(state, site)
+	return site
+
+static func _spawn_imperial_perimeter(state: Dictionary, index: int, owner: int) -> void:
+	var center: Vector2 = state["map"]["points"][index]
+	var belt: Dictionary = state["map"]["fields"][index]
+	var extent: float = float(belt["orbit_radius"]) * 1.13 + MAP.ASTEROID_MAX_RADIUS
+	# The polygon's apothem (not vertex radius) must clear all orbit phases.
+	# Longer prebuilt Imperial segments keep entity count bounded; ordinary
+	# player construction limits, recipes and wall collision rules stay intact.
+	var radius: float = (extent + IMPERIAL_WALL_CLEARANCE) / cos(PI / float(IMPERIAL_WALL_SEGMENTS))
+	var nodes: Array = []
+	for slot in range(IMPERIAL_WALL_SEGMENTS):
+		var point: Vector2 = center + Vector2.from_angle(TAU * float(slot) / float(IMPERIAL_WALL_SEGMENTS)) * radius
+		nodes.append(_spawn_completed_structure(state, owner, index, point, "wall_node"))
+	for slot in range(IMPERIAL_WALL_SEGMENTS):
+		var a: Dictionary = nodes[slot]
+		var b: Dictionary = nodes[(slot + 1) % IMPERIAL_WALL_SEGMENTS]
+		var first: Vector2 = a["position"]
+		var second: Vector2 = b["position"]
+		var wall: Dictionary = _spawn_completed_structure(state, owner, index, (first + second) * 0.5, "wall_segment")
+		wall.merge({"wall_a_id": int(a["id"]), "wall_b_id": int(b["id"]), "wall_a": first, "wall_b": second, "heading": first.direction_to(second)}, true)
 
 static func _spawn_imperial_fleet(state: Dictionary, index: int, system: Dictionary) -> void:
 	var kinds: Array = []

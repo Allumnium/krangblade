@@ -90,7 +90,18 @@ func _run() -> void:
 	var core: Dictionary = initial_state["planets"][initial_state["map"]["imperial_system"]]
 	assert(imperial > 0 and not roster.has(imperial) and int(core["owner"]) == imperial)
 	assert(core["yards"].size() == 3 and core["yards"].all(func(yard: Dictionary) -> bool: return int(yard["level"]) == 3))
-	assert(initial_state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial).size() == 27)
+	assert(initial_state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial and not ECON.is_static_structure(craft)).size() == 27)
+	var walls: Array = initial_state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial and craft["kind"] == "wall_segment")
+	assert(walls.size() == ECON.IMPERIAL_WALL_SEGMENTS)
+	var center: Vector2 = initial_state["map"]["points"][initial_state["map"]["imperial_system"]]
+	var belt: Dictionary = initial_state["map"]["fields"][initial_state["map"]["imperial_system"]]
+	var grid: Dictionary = ECON.wall_grid(initial_state)
+	for wall in walls:
+		var apothem: float = center.distance_to(Geometry2D.get_closest_point_to_segment(center, wall["wall_a"], wall["wall_b"]))
+		assert(apothem > float(belt["orbit_radius"]) * 1.13 + MAP.ASTEROID_MAX_RADIUS)
+		var outside: Vector2 = center.lerp(wall["position"], 1.1)
+		assert(ECON.wall_first_hit(initial_state, grid, 1, center, outside, true).is_empty())
+		assert(not ECON.wall_first_hit(initial_state, grid, ECON.PIRATE_OWNER, center, outside, true).is_empty())
 	assert(not initial_state["starting_empires"].has(imperial) and not initial_state["ai_players"].has(imperial))
 	for player in roster:
 		assert(ECON.empires_allied(initial_state, imperial, int(player)) and ECON.open_borders(initial_state, imperial, int(player)))
