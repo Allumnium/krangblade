@@ -189,6 +189,10 @@ func _phase_changed() -> void:
 		if state["ships"].filter(func(craft: Dictionary) -> bool: return int(craft["owner"]) == imperial and craft["kind"] == "wall_segment").size() != ECON.IMPERIAL_WALL_SEGMENTS:
 			_fail("Imperial perimeter missing.")
 			return
+		var pirate_bases: Array = state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "pirate_base")
+		if pirate_bases.size() != clampi(expected_players + 1, 3, 5) or not state.has("pirate_next_reinforcement"):
+			_fail("Pirate base roster or reinforcement schedule missing.")
+			return
 		if mode == "normal" and not _check_map_codec(state):
 			_fail("Static-map codec failed exact inventory round trip.")
 			return

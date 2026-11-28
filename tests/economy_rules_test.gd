@@ -3096,6 +3096,34 @@ func _test_fleet_upkeep() -> void:
 	assert(ECON.credit_balance(state, 1) == 0.0 and not fighter.has("unpaid_since"))
 	print("PASS: upkeep, civilian priority, separate treasuries, pause, exemptions and wage recovery")
 
+func _test_pirate_reinforcements() -> void:
+	var state: Dictionary = ECON.create(MAP.generate(827, 2), {1: {"team": 1}, 2: {"team": 2}}, [1, 2], false)
+	assert(ECON.initialize_frontier_pirates(state))
+	assert(not ECON.initialize_frontier_pirates(state))
+	var bases: Array = state["ships"].filter(func(craft: Dictionary) -> bool: return craft["kind"] == "pirate_base")
+	assert(bases.size() == 3)
+	var initial: int = state["ships"].size()
+	state["elapsed"] = ECON.PIRATE_REINFORCEMENT_YEARS - 0.1
+	ECON._reinforce_pirate_factions(state)
+	assert(state["ships"].size() == initial)
+	state["elapsed"] = ECON.PIRATE_REINFORCEMENT_YEARS
+	ECON._reinforce_pirate_factions(state)
+	assert(state["ships"].size() == initial + bases.size())
+	ECON._reinforce_pirate_factions(state)
+	assert(state["ships"].size() == initial + bases.size())
+	var destroyed: Dictionary = bases[0]
+	var destroyed_id: int = int(destroyed["id"])
+	ECON._remove_indexed_hull(state, destroyed)
+	for wave in range(20):
+		state["elapsed"] += ECON.PIRATE_REINFORCEMENT_YEARS
+		ECON._reinforce_pirate_factions(state)
+	for base in bases:
+		var faction: int = int(base["id"])
+		var count: int = state["ships"].filter(func(craft: Dictionary) -> bool: return bool(craft.get("rogue", false)) and int(craft.get("pirate_faction", -1)) == faction).size()
+		assert(count == (6 if faction == destroyed_id else ECON.PIRATE_REINFORCEMENT_CAP))
+	assert(not state["ships"].has(destroyed))
+	print("PASS: pirate reinforcement cadence, faction cap and destroyed-base permanence")
+
 func _test_rogue_defection() -> void:
 	var state: Dictionary = ECON.create(_planetary_fixture(827, 2, "Grid"), {1: {"team": 1}, 2: {"team": 2}}, [1, 2])
 	ECON.initialize_diplomacy(state)
@@ -3371,6 +3399,7 @@ func _initialize() -> void:
 		return
 	_test_optional_native_kernels()
 	_test_authority_substep_boundary()
+	_test_pirate_reinforcements()
 	_test_rogue_defection()
 	_test_fleet_upkeep()
 	_test_shared_economy_censuses()
